@@ -1,79 +1,388 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Combine AI Profile</title>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: white; text-align: center; }
-        .video-container { margin: 20px auto; border: 4px solid #333; border-radius: 10px; width: 640px; height: 480px; overflow: hidden; background: #000; }
-        button { background: #e50914; color: white; border: none; padding: 10px 20px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 5px; font-weight: bold; }
-        button:hover { background: #ff1e27; }
-        .action-btn { background: #4caf50; }
-        .action-btn:hover { background: #45a049; }
-        .stats-card { background: #1a1a1a; padding: 20px; margin: 20px auto; width: 50%; border-radius: 10px; border: 1px solid #444; display: none; }
-        .aura-tag { color: #00ffcc; font-weight: bold; text-transform: uppercase; }
-        .status-bar { margin: 10px; color: #aaa; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Combine AI — Scouting Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0b0e14;
+    --panel: #12161f;
+    --panel-border: #232838;
+    --amber: #f2a93b;
+    --cyan: #3fd0c9;
+    --red: #ff5d5d;
+    --text: #e7eaf0;
+    --muted: #8a93a6;
+    --radius: 14px;
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(242,169,59,0.08), transparent 60%),
+      radial-gradient(1200px 600px at 90% 0%, rgba(63,208,201,0.06), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+
+  .app{ max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .topbar{ display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom: 28px; }
+  .brand{ font-family:'Oswald', sans-serif; font-weight:700; font-size:28px; letter-spacing:0.5px; text-transform: uppercase; }
+  .brand .accent{ color: var(--amber); }
+  .brand-mark{ color: var(--cyan); margin-right: 6px; }
+  .tagline{ color: var(--muted); font-size: 14px; }
+
+  .layout{ display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 880px){ .layout{ grid-template-columns: 1fr; } }
+
+  .video-frame{
+    position: relative; width: 100%; aspect-ratio: 4 / 3;
+    background: #000; border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.4), 0 20px 50px -20px rgba(0,0,0,0.6);
+  }
+  .video-frame img{ width: 100%; height: 100%; object-fit: cover; display:block; }
+
+  .hud{ position:absolute; left:0; right:0; display:flex; padding: 12px 16px; pointer-events:none; }
+  .hud-top{ top:0; justify-content: space-between; }
+  .hud-chip{
+    font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--text);
+    background: rgba(11,14,20,0.7); border: 1px solid var(--panel-border);
+    padding: 6px 12px; border-radius: 999px; backdrop-filter: blur(4px);
+  }
+  .hud-score{ display:flex; gap:6px; align-items:baseline; }
+  .hud-score span{ font-size: 16px; color: var(--amber); font-weight: 600; }
+  .hud-score label{ font-size: 10px; color: var(--muted); letter-spacing: 1px; }
+  .hud-reps{ margin-left: 2px; }
+  .hud-bottom{
+    bottom: 0; background: linear-gradient(180deg, transparent, rgba(11,14,20,0.85) 40%);
+    padding-top: 32px; font-size: 14px; color: var(--text);
+  }
+  .hud-bottom span{ font-weight: 500; }
+  .hud-bottom.warn span{ color: var(--red); }
+  .hud-bottom.good span{ color: var(--cyan); }
+
+  .events{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+  @media (max-width: 640px){ .events{ grid-template-columns: 1fr; } }
+
+  .event-btn{
+    text-align:left; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: var(--radius); padding: 14px 16px; cursor: pointer; color: var(--text);
+    display:flex; flex-direction:column; gap: 4px; transition: border-color .15s, transform .15s;
+  }
+  .event-btn:hover{ border-color: var(--amber); transform: translateY(-1px); }
+  .event-btn:focus-visible{ outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .event-btn.active{ border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; }
+  .event-index{ font-family:'JetBrains Mono', monospace; font-size: 11px; color: var(--cyan); letter-spacing: 1px; }
+  .event-name{ font-family:'Oswald', sans-serif; font-size: 16px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .event-desc{ font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+  .telemetry{
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: var(--radius);
+    padding: 20px; display:flex; flex-direction:column; gap: 18px;
+  }
+  .telemetry h2{
+    font-family:'Oswald', sans-serif; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--muted); margin: 0;
+  }
+
+  .gauges{ display:grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .gauge{ display:flex; flex-direction:column; align-items:center; gap: 6px; }
+  .gauge svg{ width: 88px; height: 88px; }
+  .gauge-track{ fill:none; stroke: var(--panel-border); stroke-width: 8; }
+  .gauge-value{ fill:none; stroke: var(--cyan); stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset .25s ease; }
+  .gauge-num{ font-family:'JetBrains Mono', monospace; font-size: 15px; }
+  .gauge-label{ font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .jump-meter{ display:flex; flex-direction:column; gap: 8px; }
+  .dist-meter{ display:flex; flex-direction:column; gap: 8px; }
+  .dist-label{ font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .jump-bar-track{ height: 14px; border-radius: 999px; background: var(--panel-border); overflow:hidden; }
+  .jump-bar-fill{ height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--amber)); transition: width .25s ease; }
+  .jump-readout{ display:flex; justify-content: space-between; font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--muted); }
+  .jump-readout b{ color: var(--text); font-weight:600; }
+
+  .actions{ display:flex; flex-direction:column; gap: 10px; }
+  button.btn-primary, button.btn-secondary{
+    font-family:'Inter', sans-serif; font-weight: 600; font-size: 14px;
+    border: none; border-radius: 10px; padding: 12px 16px; cursor: pointer;
+  }
+  button.btn-primary{ background: var(--amber); color: #1a1204; }
+  button.btn-primary:hover{ filter: brightness(1.08); }
+  button.btn-primary:disabled{ background: var(--panel-border); color: var(--muted); cursor: default; }
+  button.btn-secondary{ background: transparent; border: 1px solid var(--cyan); color: var(--cyan); }
+  button.btn-secondary:hover{ background: rgba(63,208,201,0.08); }
+  button:focus-visible{ outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+  .status{ font-family:'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
+
+  .report{
+    margin-top: 24px; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: var(--radius); padding: 24px; display:none;
+  }
+  .report h2{ font-family:'Oswald', sans-serif; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 4px; }
+  .report .sport{ color: var(--amber); font-size: 20px; font-weight: 600; }
+  .traits{ display:flex; gap: 8px; flex-wrap:wrap; margin: 12px 0 20px; }
+  .trait-tag{
+    font-family:'JetBrains Mono', monospace; font-size: 12px; color: var(--cyan);
+    border: 1px solid rgba(63,208,201,0.4); padding: 4px 10px; border-radius: 999px;
+  }
+  .stat-row{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .stat-box{ background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px; text-align:center; }
+  .stat-box .num{ font-family:'JetBrains Mono', monospace; font-size: 24px; color: var(--text); }
+  .stat-box .lbl{ font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .report-footnote{ font-size: 11px; color: var(--muted); margin-top: 18px; }
+</style>
 </head>
 <body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">&#9670;</span>Combine<span class="accent">AI</span></div>
+      <div class="tagline">Vision-based scouting combine — form-first scoring from joint angles and lift/depth distance, not just rep count</div>
+    </header>
 
-    <h1>Scouting Combine AI 🧬</h1>
-    <p>Perform the tests. Farm your aura. Get drafted.</p>
+    <main class="layout">
+      <section class="stage">
+        <div class="video-frame">
+          <img src="/video_feed" alt="Live camera feed with pose overlay">
+          <div class="hud hud-top">
+            <div class="hud-chip" id="hudTimer">--</div>
+            <div class="hud-chip hud-score"><span id="hudScore">0</span><label>&nbsp;SCORE</label><label class="hud-reps" id="hudReps">&nbsp;· 0 reps</label></div>
+          </div>
+          <div class="hud hud-bottom" id="hudFeedback"><span>Press Start when you're ready</span></div>
+        </div>
 
-    <div>
-        <button onclick="setMode('high_knees')">1. Start 10s High Knees</button>
-        <button onclick="setMode('squat')">2. Start Squat Test</button>
-    </div>
+        <div class="events">
+          <button class="event-btn active" data-mode="high_knees" onclick="setMode('high_knees', this)">
+            <span class="event-index">EVENT 01</span>
+            <span class="event-name">High Knees</span>
+            <span class="event-desc">10s max effort — knee drive &amp; arm pump scored</span>
+          </button>
+          <button class="event-btn" data-mode="squat" onclick="setMode('squat', this)">
+            <span class="event-index">EVENT 02</span>
+            <span class="event-name">Squat Test</span>
+            <span class="event-desc">Depth, lockout, and left/right symmetry</span>
+          </button>
+          <button class="event-btn" data-mode="jump" onclick="setMode('jump', this)">
+            <span class="event-index">EVENT 03</span>
+            <span class="event-name">Vertical Jump</span>
+            <span class="event-desc">15s window — best jump height in cm</span>
+          </button>
+        </div>
+      </section>
 
-    <div class="video-container">
-        <img src="/video_feed" width="640" height="480" />
-    </div>
+      <aside class="telemetry">
+        <h2>Live Telemetry</h2>
 
-    <div>
-        <button class="action-btn" onclick="saveCurrentScore()">Save Current Score</button>
-        <button class="action-btn" onclick="generateProfile()" style="background: #2196F3;">Generate Scout Profile</button>
-    </div>
-    
-    <div class="status-bar" id="system-status">System Ready...</div>
+        <div class="gauges" id="gauges"><!-- populated by JS --></div>
 
-    <div class="stats-card" id="profileCard">
-        <h2>Official Scout Report</h2>
-        <p><strong>Recommended Sport:</strong> <span class="aura-tag" id="sportRec"></span></p>
-        <p><strong>Top Traits:</strong> <span id="traits"></span></p>
-        <hr style="border-color: #333;">
-        <p>High Knee Reps (10s): <span id="runStat" class="aura-tag"></span></p>
-        <p>Squat Reps: <span id="squatStat" class="aura-tag"></span></p>
-        <p style="font-size: 0.8em; color: #888; margin-top: 20px;">Screenshot this and send to your coach.</p>
-    </div>
+        <div class="dist-meter" id="distMeter" style="display:none;">
+          <div class="dist-label" id="distLabel">Knee lift</div>
+          <div class="jump-bar-track"><div class="jump-bar-fill" id="distBarFill"></div></div>
+          <div class="jump-readout"><span id="distReadout">0%</span><span>target: <b>100%</b></span></div>
+        </div>
 
-    <script>
-        function setMode(mode) {
-            fetch('/set_mode', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({mode: mode})
-            });
-            document.getElementById('system-status').innerText = "Switched to: " + mode.replace('_', ' ').toUpperCase();
-        }
+        <div class="jump-meter" id="jumpMeter" style="display:none;">
+          <div class="jump-bar-track"><div class="jump-bar-fill" id="jumpBarFill"></div></div>
+          <div class="jump-readout">
+            <span>Last: <b id="jumpLast">0</b> cm</span>
+            <span>Best: <b id="jumpBest">0</b> cm</span>
+          </div>
+        </div>
 
-        function saveCurrentScore() {
-            fetch('/save_score', { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('system-status').innerText = "Score saved successfully!";
-            });
-        }
+        <div class="actions">
+          <button class="btn-primary" id="startBtn" onclick="startTest()">Start</button>
+          <button class="btn-secondary" id="restartBtn" onclick="restartTest()">Restart</button>
+          <button class="btn-secondary" onclick="saveCurrentScore()">Save Score</button>
+          <button class="btn-secondary" onclick="generateProfile()">Generate Scout Report</button>
+        </div>
 
-        function generateProfile() {
-            fetch('/generate_profile')
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('profileCard').style.display = 'block';
-                document.getElementById('sportRec').innerText = data.sport;
-                document.getElementById('traits').innerText = data.skills.join(' | ');
-                document.getElementById('runStat').innerText = data.run_stat;
-                document.getElementById('squatStat').innerText = data.squat_stat;
-            });
-        }
-    </script>
+        <div class="status" id="systemStatus">System ready.</div>
+      </aside>
+    </main>
+
+    <section class="report" id="profileCard">
+      <h2>Official Scout Report</h2>
+      <div class="sport" id="sportRec"></div>
+      <div class="traits" id="traits"></div>
+      <div class="stat-row">
+        <div class="stat-box"><div class="num" id="runStat">0</div><div class="lbl">High Knees Form /100</div></div>
+        <div class="stat-box"><div class="num" id="squatStat">0</div><div class="lbl">Squat Form /100</div></div>
+        <div class="stat-box"><div class="num" id="jumpStat">0</div><div class="lbl">Best Jump (cm)</div></div>
+      </div>
+      <p class="report-footnote">Screenshot this and send it to your coach.</p>
+    </section>
+  </div>
+
+<script>
+  const GAUGE_MAX_ANGLE = 180;
+  const gaugeLabels = { left_knee: "L KNEE", right_knee: "R KNEE", left_elbow: "L ELBOW", right_elbow: "R ELBOW" };
+  const gaugeState = {}; // key -> { circle, num }
+  let currentMode = "high_knees";
+
+  function buildGauge(key) {
+    const wrap = document.createElement('div');
+    wrap.className = 'gauge';
+    const r = 34, c = 2 * Math.PI * r;
+    wrap.innerHTML = `
+      <svg viewBox="0 0 88 88">
+        <circle class="gauge-track" cx="44" cy="44" r="${r}"></circle>
+        <circle class="gauge-value" cx="44" cy="44" r="${r}"
+          stroke-dasharray="${c}" stroke-dashoffset="${c}"
+          transform="rotate(-90 44 44)"></circle>
+        <text x="44" y="49" text-anchor="middle" class="gauge-num" fill="currentColor">--</text>
+      </svg>
+      <div class="gauge-label">${gaugeLabels[key] || key}</div>`;
+    document.getElementById('gauges').appendChild(wrap);
+    gaugeState[key] = { circle: wrap.querySelector('.gauge-value'), num: wrap.querySelector('.gauge-num'), circumference: c };
+  }
+
+  function updateGauge(key, angle) {
+    if (!gaugeState[key]) buildGauge(key);
+    const g = gaugeState[key];
+    const pct = Math.max(0, Math.min(1, angle / GAUGE_MAX_ANGLE));
+    g.circle.setAttribute('stroke-dashoffset', g.circumference * (1 - pct));
+    g.num.textContent = Math.round(angle);
+  }
+
+  function clearGauges() {
+    document.getElementById('gauges').innerHTML = '';
+    for (const k in gaugeState) delete gaugeState[k];
+  }
+
+  function setStartButtonState(started) {
+    const startBtn = document.getElementById('startBtn');
+    startBtn.textContent = started ? 'Running…' : 'Start';
+    startBtn.disabled = started;
+  }
+
+  const distConfig = {
+    high_knees: { label: "Knee lift", key: "lift_pct" },
+    squat: { label: "Squat depth", key: "depth_pct" },
+  };
+
+  function setMode(mode, btnEl) {
+    currentMode = mode;
+    document.querySelectorAll('.event-btn').forEach(b => b.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+    clearGauges();
+    const isJump = mode === 'jump';
+    const dist = distConfig[mode];
+    document.getElementById('jumpMeter').style.display = isJump ? 'flex' : 'none';
+    document.getElementById('gauges').style.display = isJump ? 'none' : 'grid';
+    document.getElementById('distMeter').style.display = dist ? 'flex' : 'none';
+    if (dist) document.getElementById('distLabel').textContent = dist.label;
+    setStartButtonState(false);
+
+    fetch('/set_mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode: mode})
+    });
+    document.getElementById('systemStatus').textContent = "Switched to: " + mode.replace('_', ' ').toUpperCase() + " — press Start when ready.";
+  }
+
+  function startTest() {
+    fetch('/start_test', { method: 'POST' })
+      .then(res => res.json())
+      .then(() => {
+        setStartButtonState(true);
+        document.getElementById('systemStatus').textContent = "Test started — go!";
+      });
+  }
+
+  function restartTest() {
+    fetch('/restart_test', { method: 'POST' })
+      .then(res => res.json())
+      .then(() => {
+        clearGauges();
+        document.getElementById('jumpBarFill').style.width = '0%';
+        document.getElementById('jumpLast').textContent = '0';
+        document.getElementById('jumpBest').textContent = '0';
+        document.getElementById('distBarFill').style.width = '0%';
+        document.getElementById('distReadout').textContent = '0%';
+        document.getElementById('hudReps').textContent = '\u00A0\u00B7 0 reps';
+        setStartButtonState(false);
+        document.getElementById('systemStatus').textContent = "Reset — press Start when ready.";
+      });
+  }
+
+  function saveCurrentScore() {
+    fetch('/save_score', { method: 'POST' })
+      .then(res => res.json())
+      .then(() => { document.getElementById('systemStatus').textContent = "Score saved."; });
+  }
+
+  function generateProfile() {
+    fetch('/generate_profile')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('profileCard').style.display = 'block';
+        document.getElementById('sportRec').textContent = data.sport;
+        document.getElementById('traits').innerHTML =
+          data.skills.map(s => `<span class="trait-tag">${s}</span>`).join('');
+        document.getElementById('runStat').textContent = data.run_stat;
+        document.getElementById('squatStat').textContent = data.squat_stat;
+        document.getElementById('jumpStat').textContent = data.jump_stat;
+        document.getElementById('profileCard').scrollIntoView({behavior: 'smooth', block: 'start'});
+      });
+  }
+
+  function poll() {
+    fetch('/live_stats').then(res => res.json()).then(data => {
+      document.getElementById('hudScore').textContent = data.score ?? 0;
+
+      const fbEl = document.getElementById('hudFeedback');
+      fbEl.innerHTML = `<span>${data.feedback || ''}</span>`;
+      fbEl.classList.toggle('warn', /step back|calibrat|no person/i.test(data.feedback || ''));
+      fbEl.classList.toggle('good', /great form|calibrated|lockout/i.test(data.feedback || ''));
+
+      const timerEl = document.getElementById('hudTimer');
+      if (typeof data.time_remaining === 'number') {
+        timerEl.textContent = data.time_remaining.toFixed(1) + 's';
+      } else {
+        timerEl.textContent = '--';
+      }
+
+      if (data.angles) {
+        for (const [key, val] of Object.entries(data.angles)) updateGauge(key, val);
+      }
+
+      if (typeof data.reps === 'number') {
+        document.getElementById('hudReps').textContent = `\u00A0\u00B7 ${data.reps} reps`;
+      }
+
+      const dist = distConfig[currentMode];
+      if (dist && typeof data[dist.key] === 'number') {
+        const pct = Math.max(0, Math.min(140, data[dist.key]));
+        document.getElementById('distBarFill').style.width = Math.min(100, pct) + '%';
+        document.getElementById('distReadout').textContent = Math.round(pct) + '%';
+      }
+
+      if (typeof data.started === 'boolean') {
+        setStartButtonState(data.started && !data.done);
+      }
+
+      if (currentMode === 'jump') {
+        const best = data.best_jump_cm || 0;
+        const last = data.last_jump_cm || 0;
+        document.getElementById('jumpBest').textContent = best.toFixed ? best.toFixed(0) : best;
+        document.getElementById('jumpLast').textContent = last.toFixed ? last.toFixed(0) : last;
+        document.getElementById('jumpBarFill').style.width = Math.min(100, (best / 80) * 100) + '%';
+      }
+    }).catch(() => {});
+  }
+
+  setInterval(poll, 350);
+  poll();
+</script>
 </body>
 </html>
