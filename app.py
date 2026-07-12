@@ -1,11 +1,22 @@
 """
 Flask application handling API routing and bridging the frontend to OpenCV tracking.
 """
+import os
 import time
+import uuid
 from flask import Flask, Response, jsonify, render_template, request
-from detector import generate_live_stream, live_state, TEST_REGISTRY
+from werkzeug.utils import secure_filename
+from detector import generate_live_stream, live_state, TEST_REGISTRY, process_video_file
 
 app = Flask(__name__)
+
+UPLOAD_DIR = os.path.join(app.root_path, 'static', 'uploads')
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'}
+
+
+def _is_allowed_video(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
 
 # User stats (Global). 
 user_stats = {
@@ -67,6 +78,40 @@ def restart_test():
     """Resets the currently active test data."""
     live_state.restart_test()
     return jsonify({"status": "restarted", "snapshot": live_state.snapshot()})
+
+
+@app.route('/upload_video', methods=['POST'])
+def upload_video():
+    """Processes an uploaded video file end-to-end (instead of the live webcam)
+    and returns the final score plus a URL to the annotated replay."""
+    file = request.files.get('video')
+    mode = request.form.get('mode', live_state.test_name)
+
+    if not file or file.filename == '':
+        return jsonify({"status": "error", "message": "No video file provided"}), 400
+    if not _is_allowed_video(file.filename):
+        return jsonify({"status": "error", "message": "Unsupported video format"}), 400
+    if mode not in TEST_REGISTRY:
+        return jsonify({"status": "error", "message": f"Unknown mode '{mode}'"}), 400
+
+    uid = uuid.uuid4().hex
+    upload_path = os.path.join(UPLOAD_DIR, f"{uid}_{secure_filename(file.filename)}")
+    file.save(upload_path)
+
+    output_filename = f"annotated_{uid}.mp4"
+    output_path = os.path.join(UPLOAD_DIR, output_filename)
+
+    try:
+        process_video_file(upload_path, output_path, mode)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Could not process video: {e}"}), 500
+    finally:
+        if os.path.exists(upload_path):
+            os.remove(upload_path)
+
+    snap = live_state.snapshot()
+    snap["video_url"] = f"/static/uploads/{output_filename}"
+    return jsonify({"status": "processed", **snap})
 
 
 @app.route('/live_stats')
