@@ -708,8 +708,8 @@
     dropZone.classList.add('hidden');
 
     document.getElementById('hudTimer').textContent = '…';
-    document.getElementById('hudFeedback').innerHTML = '<span>Analyzing footage frame by frame...</span>';
-    document.getElementById('hudFeedback').className = "hud hud-bottom good";
+    document.getElementById('hudFeedback').innerHTML = '';
+    document.getElementById('hudFeedback').className = "hud hud-bottom";
     document.getElementById('systemStatus').textContent = `Uploading "${file.name}"...`;
 
     const formData = new FormData();
