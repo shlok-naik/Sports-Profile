@@ -11,7 +11,7 @@ from detector import (
     get_required_duration, get_video_duration_seconds,
 )
 from benchmarks import build_profile
-from database import save_athlete, get_athletes, create_tables
+from database import save_athlete, get_athletes, create_tables, upsert_athlete_by_name
 
 app = Flask(__name__)
 
@@ -23,13 +23,15 @@ ALLOWED_VIDEO_EXTENSIONS = {'mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'}
 def _is_allowed_video(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_VIDEO_EXTENSIONS
 
-# User stats (Global).
+# User stats (Global). "attempted" tracks whether that test has actually
+# been logged at least once, so the report can show "N/A" instead of a
+# misleading 0 for events the athlete hasn't done yet.
 user_stats = {
-    "running_spot": {"score": 0, "reps": 0},
-    "high_knees": {"score": 0, "reps": 0},
-    "jump": {"score": 0, "best_cm": 0},
-    "pushup": {"score": 0, "reps": 0},
-    "plank": {"score": 0, "reps": 0},
+    "running_spot": {"score": 0, "reps": 0, "attempted": False},
+    "high_knees": {"score": 0, "reps": 0, "attempted": False},
+    "jump": {"score": 0, "best_cm": 0, "attempted": False},
+    "pushup": {"score": 0, "reps": 0, "attempted": False},
+    "plank": {"score": 0, "reps": 0, "attempted": False},
 }
 
 
@@ -188,11 +190,13 @@ def save_score():
         user_stats["jump"] = {
             "score": snap.get("score", 0),
             "best_cm": snap.get("best_jump_cm", 0),
+            "attempted": True,
         }
     elif test in user_stats:
         user_stats[test] = {
             "score": snap.get("score", 0),
             "reps": snap.get("reps", 0),
+            "attempted": True,
         }
 
     db_status = _save_athlete_record()
@@ -252,20 +256,67 @@ def generate_profile():
 
     profile = build_profile(metrics, jump_cm)
 
+    # Events that haven't been attempted yet report as "N/A" instead of a
+    # misleading 0 — both in the displayed stat and its percentile.
+    percentiles = dict(profile["percentiles"])
+    for key in metrics:
+        if not user_stats[key]["attempted"]:
+            percentiles[f"{key}_percentile"] = None
+
+    def stat_or_na(test_key, value):
+        return value if user_stats[test_key]["attempted"] else "N/A"
+
     return jsonify({
         "sport": profile["sport"],
         "position": profile["position"],
         "archetype": profile["archetype"],
         "archetype_desc": profile["archetype_desc"],
         "skills": profile["skills"],
-        "run_stat": metrics["running_spot"],
-        "knee_stat": metrics["high_knees"],
-        "jump_stat": jump_cm,
-        "jump_score": metrics["jump"],
-        "pushup_stat": metrics["pushup"],
-        "plank_stat": metrics["plank"],
-        "percentiles": profile["percentiles"],
+        "run_stat": stat_or_na("running_spot", metrics["running_spot"]),
+        "knee_stat": stat_or_na("high_knees", metrics["high_knees"]),
+        "jump_stat": stat_or_na("jump", jump_cm),
+        "jump_score": metrics["jump"],  # kept numeric — feeds the radar chart, not shown directly
+        "pushup_stat": stat_or_na("pushup", metrics["pushup"]),
+        "plank_stat": stat_or_na("plank", metrics["plank"]),
+        "percentiles": percentiles,
     })
+
+
+@app.route('/commit_report', methods=['POST'])
+def commit_report():
+    """Saves the current scout report to the athlete database under a given
+    name. Committing again under a name that's already saved resets that
+    athlete's record in place rather than creating a duplicate."""
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "Enter a name before committing the report."}), 400
+
+    metrics = {
+        "running_spot": user_stats["running_spot"]["score"],
+        "high_knees": user_stats["high_knees"]["score"],
+        "jump": user_stats["jump"]["score"],
+        "pushup": user_stats["pushup"]["score"],
+        "plank": user_stats["plank"]["score"],
+    }
+    jump_cm = user_stats["jump"]["best_cm"]
+    sport = build_profile(metrics, jump_cm)["sport"]
+
+    record = {
+        "sport": sport,
+        "running": metrics["running_spot"],
+        "high_knees": metrics["high_knees"],
+        "jump": jump_cm,
+        "pushups": metrics["pushup"],
+        "plank": metrics["plank"],
+    }
+
+    try:
+        athlete_id = upsert_athlete_by_name(name, record)
+        return jsonify({"status": "committed", "name": name, "id": athlete_id})
+    except Exception as e:
+        print(f"[database] Could not commit report for '{name}': {e}")
+        return jsonify({"status": "error", "message": "Could not save to the database right now."}), 500
 
 
 @app.route('/scout')

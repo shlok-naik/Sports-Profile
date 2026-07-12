@@ -151,3 +151,51 @@ def get_athlete_count():
 
 
     return count
+
+
+def upsert_athlete_by_name(name, data):
+    """Saves a full scout report under `name`. If that name already has a
+    saved record, its stats are overwritten (reset) in place instead of
+    creating a duplicate row."""
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id FROM athletes WHERE name = %s LIMIT 1", (name,))
+    existing = cursor.fetchone()
+
+    values = (
+        data["sport"],
+        data["running"],
+        data["high_knees"],
+        data["jump"],
+        data["pushups"],
+        data["plank"],
+    )
+
+    if existing:
+        athlete_id = existing[0]
+        cursor.execute(
+            """
+            UPDATE athletes
+            SET sport=%s, running=%s, high_knees=%s, jump=%s, pushups=%s, plank=%s
+            WHERE id=%s
+            """,
+            values + (athlete_id,),
+        )
+    else:
+        cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM athletes")
+        athlete_id = cursor.fetchone()[0]
+        cursor.execute(
+            """
+            INSERT INTO athletes (id, name, sport, running, high_knees, jump, pushups, plank)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (athlete_id, name) + values,
+        )
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return athlete_id

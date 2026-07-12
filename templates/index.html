@@ -213,6 +213,12 @@
   .stat-box .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
   .stat-box .pctl { font-size: 10px; color: var(--cyan); margin-top: 4px; }
   .report-footnote { font-size: 11px; color: var(--muted); margin-top: 18px; }
+  .commit-row { display: flex; gap: 10px; margin-top: 10px; }
+  .commit-input {
+    flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--panel-border);
+    border-radius: 10px; padding: 12px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 14px;
+  }
+  .commit-input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
   #pdfExportBtn { margin-top: 16px; }
 
   /* Radar */
@@ -251,7 +257,7 @@
     #profileCard .radar-ring, #profileCard .radar-axis { stroke: #ccc !important; }
     #profileCard .radar-fill { fill: #0a7d76 !important; fill-opacity: 0.25 !important; stroke: #0a7d76 !important; }
     #profileCard .radar-label { fill: #333 !important; }
-    #pdfExportBtn { display: none !important; }
+    #pdfExportBtn, #commitRow { display: none !important; }
   }
 </style>
 </head>
@@ -385,6 +391,10 @@
         <div class="stat-box"><div class="num" id="plankStat">0</div><div class="lbl">Plank /100</div><div class="pctl" id="plankPctl"></div></div>
       </div>
       <p class="report-footnote">Percentiles are estimated against general population benchmarks.</p>
+      <div class="commit-row" id="commitRow">
+        <input type="text" id="commitNameInput" class="commit-input" placeholder="Athlete name" maxlength="100">
+        <button class="btn-secondary" id="commitReportBtn" onclick="commitReport()">Commit Report</button>
+      </div>
       <button class="btn-secondary" id="pdfExportBtn" onclick="window.print()">Export Report as PDF</button>
     </section>
   </div>
@@ -657,6 +667,12 @@
       (typeof value === 'number') ? `${ordinal(Math.round(value))} percentile` : '';
   }
 
+  // Events that haven't been attempted come back as the string "N/A" —
+  // display it as-is, but feed the radar chart 0 instead (it needs a number).
+  function statNumeric(value) {
+    return (typeof value === 'number') ? value : 0;
+  }
+
   function generateProfile() {
     fetch('/generate_profile')
       .then(res => res.json())
@@ -669,7 +685,7 @@
         document.getElementById('archetypeDesc').textContent = data.archetype_desc;
         document.getElementById('traits').innerHTML = data.skills.map(s => `<span class="trait-tag">${s}</span>`).join('');
         document.getElementById('runStat').textContent = data.run_stat;
-        document.getElementById('jumpStat').textContent = Number(data.jump_stat).toFixed(1);
+        document.getElementById('jumpStat').textContent = (data.jump_stat === 'N/A') ? 'N/A' : Number(data.jump_stat).toFixed(1);
         document.getElementById('kneeStat').textContent = data.knee_stat;
         document.getElementById('pushupStat').textContent = data.pushup_stat;
         document.getElementById('plankStat').textContent = data.plank_stat;
@@ -682,13 +698,41 @@
         setPercentileText('plankPctl', pctl.plank_percentile);
 
         buildRadarChart({
-          run: data.run_stat, jump: data.jump_score, knees: data.knee_stat,
-          pushup: data.pushup_stat, plank: data.plank_stat,
+          run: statNumeric(data.run_stat), jump: data.jump_score, knees: statNumeric(data.knee_stat),
+          pushup: statNumeric(data.pushup_stat), plank: statNumeric(data.plank_stat),
         });
 
         document.title = `CombineAI Scout Report — ${data.sport}`;
         card.scrollIntoView({behavior: 'smooth', block: 'start'});
       }).catch(err => console.error("Error generating profile:", err));
+  }
+
+  function commitReport() {
+    const input = document.getElementById('commitNameInput');
+    const name = input.value.trim();
+    if (!name) {
+      document.getElementById('systemStatus').textContent = "Enter a name before committing the report.";
+      input.focus();
+      return;
+    }
+
+    fetch('/commit_report', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name})
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'committed') {
+          document.getElementById('systemStatus').textContent = `Report committed to the database as "${name}".`;
+        } else {
+          document.getElementById('systemStatus').textContent = data.message || "Could not commit report.";
+        }
+      })
+      .catch(err => {
+        document.getElementById('systemStatus').textContent = "Could not commit report — check your connection.";
+        console.error('Error committing report:', err);
+      });
   }
 
   // --- Upload-instead-of-webcam ---
