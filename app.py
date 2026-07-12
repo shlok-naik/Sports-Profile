@@ -3,12 +3,14 @@ from detector import generate_live_stream, live_state, TEST_REGISTRY
 
 app = Flask(__name__)
 
-# Each test now saves its composite 0-100 form score alongside supporting
-# numbers (rep count, or best jump distance) rather than a raw rep tally.
+# Every test now saves its composite 0-100 form score alongside supporting
+# numbers (rep/step/sample count, or best jump distance).
 user_stats = {
+    "running_spot": {"score": 0, "reps": 0},
     "high_knees": {"score": 0, "reps": 0},
-    "squat": {"score": 0, "reps": 0},
     "jump": {"score": 0, "best_cm": 0},
+    "pushup": {"score": 0, "reps": 0},
+    "plank": {"score": 0, "reps": 0},
 }
 
 
@@ -70,27 +72,34 @@ def save_score():
 
 @app.route('/generate_profile', methods=['GET'])
 def generate_profile():
-    squat_score = user_stats["squat"]["score"]
-    run_score = user_stats["high_knees"]["score"]
+    run_score = user_stats["running_spot"]["score"]
+    knee_score = user_stats["high_knees"]["score"]
     jump_score = user_stats["jump"]["score"]
     jump_cm = user_stats["jump"]["best_cm"]
+    pushup_score = user_stats["pushup"]["score"]
+    plank_score = user_stats["plank"]["score"]
+
+    scores = [run_score, knee_score, jump_score, pushup_score, plank_score]
+    any_data = any(s > 0 for s in scores)
 
     recommended_sport = "General Athlete"
     traits = ["Adaptive Athlete"]
-    any_data = squat_score > 0 or run_score > 0 or jump_score > 0
 
-    if squat_score >= 70 and run_score >= 70 and jump_cm >= 45:
-        recommended_sport = "Rugby / American Football"
-        traits = ["Powerhouse Base", "High Engine", "Explosive Accelerator"]
+    if pushup_score >= 75 and plank_score >= 75 and knee_score >= 70:
+        recommended_sport = "Multi-Sport / Combine All-Rounder"
+        traits = ["Complete Athletic Profile", "Strong Core-to-Power Transfer"]
     elif jump_score >= 80:
         recommended_sport = "Basketball / Volleyball"
         traits = ["Elite Vertical Explosiveness", "Fast-Twitch Dominant"]
-    elif run_score >= 80:
+    elif run_score >= 80 and knee_score >= 70:
         recommended_sport = "Sprinting / Soccer"
-        traits = ["Rapid Foot-Speed", "High Cadence Rate", "Agile Core"]
-    elif squat_score >= 80:
-        recommended_sport = "Combat Sports / Weightlifting"
-        traits = ["Elite Lower-Body Power", "Solid Center of Gravity"]
+        traits = ["Efficient Running Form", "High Cadence", "Agile Core"]
+    elif pushup_score >= 80:
+        recommended_sport = "Football (Line) / Combat Sports"
+        traits = ["Elite Upper-Body Power", "Strong Pressing Strength"]
+    elif plank_score >= 80:
+        recommended_sport = "Gymnastics / CrossFit"
+        traits = ["Elite Core Stability", "Excellent Body Control"]
     elif any_data:
         recommended_sport = "Developing Prospect"
         traits = ["Active Foundation", "Building Motor Skills"]
@@ -98,15 +107,17 @@ def generate_profile():
     return jsonify({
         "sport": recommended_sport,
         "skills": traits,
-        "squat_stat": squat_score,
         "run_stat": run_score,
+        "knee_stat": knee_score,
         "jump_stat": jump_cm,
         "jump_score": jump_score,
+        "pushup_stat": pushup_score,
+        "plank_stat": plank_score,
     })
 
 
 if __name__ == '__main__':
-    live_state.set_test("high_knees")
+    live_state.set_test("running_spot")
 
     print("\n🚀 Combine AI Dashboard is live! Open your browser and go to:")
     print("👉 http://127.0.0.1:5000\n")

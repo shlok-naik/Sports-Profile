@@ -81,17 +81,156 @@ class FitnessTest:
         return sum(vis) / len(vis) if vis else 0.0
 
 
-class HighKneeTest(FitnessTest):
-    """10s high-knee / running-on-the-spot test.
+class RunningInPlaceTest(FitnessTest):
+    """Running-on-the-spot test focused on running FORM — cadence, posture,
+    and arm swing — not knee height (that's the dedicated High Knees event).
+    Any noticeable knee bend counts as a step."""
 
-    Scoring is built from three things measured on every rep:
+    STEP_UP_ANGLE = 155      # hip-knee-ankle angle below this = a step has begun
+    STEP_DOWN_ANGLE = 170    # above this = foot back down, ready for next step
+    IDEAL_LEAN = 8.0         # a slight forward lean is proper running form
+    LEAN_TOLERANCE = 18.0
+    ELBOW_TARGET = 90.0
+    ELBOW_TOLERANCE = 45.0
+    CADENCE_TARGET = 170.0   # steps per minute, a common efficient-running benchmark
+    CADENCE_TOLERANCE = 55.0
+    CADENCE_WINDOW = 6       # steps used to estimate current cadence
+
+    REQUIRED_LANDMARKS = [
+        mp_pose.PoseLandmark.LEFT_SHOULDER.value, mp_pose.PoseLandmark.RIGHT_SHOULDER.value,
+        mp_pose.PoseLandmark.LEFT_HIP.value, mp_pose.PoseLandmark.RIGHT_HIP.value,
+        mp_pose.PoseLandmark.LEFT_KNEE.value, mp_pose.PoseLandmark.RIGHT_KNEE.value,
+        mp_pose.PoseLandmark.LEFT_ANKLE.value, mp_pose.PoseLandmark.RIGHT_ANKLE.value,
+        mp_pose.PoseLandmark.LEFT_ELBOW.value, mp_pose.PoseLandmark.RIGHT_ELBOW.value,
+        mp_pose.PoseLandmark.LEFT_WRIST.value, mp_pose.PoseLandmark.RIGHT_WRIST.value,
+    ]
+
+    def __init__(self, duration=10.0):
+        super().__init__()
+        self.duration = duration
+        self.start_time = None
+        self.last_angles = {}
+        self.step_timestamps = []
+        self.live_cadence = 0.0
+        self.side = {"LEFT": self._new_side_state(), "RIGHT": self._new_side_state()}
+
+    @staticmethod
+    def _new_side_state():
+        return {"stage": "down", "peak_elbow": 180.0, "peak_lean": 0.0}
+
+    def start(self):
+        super().start()
+        self.start_time = time.time()
+
+    def _run(self, landmarks, frame_shape):
+        elapsed = time.time() - self.start_time
+        remaining = max(0.0, self.duration - elapsed)
+
+        if self._avg_visibility(landmarks, self.REQUIRED_LANDMARKS) < self.MIN_VISIBILITY:
+            self.feedback = "Step back so your full body is visible"
+            return self.quality_score, self.feedback
+
+        L = mp_pose.PoseLandmark
+        pts = {}
+        for s in ("LEFT", "RIGHT"):
+            pts[s] = {
+                "shoulder": get_xy(landmarks, getattr(L, f"{s}_SHOULDER")),
+                "hip": get_xy(landmarks, getattr(L, f"{s}_HIP")),
+                "knee": get_xy(landmarks, getattr(L, f"{s}_KNEE")),
+                "ankle": get_xy(landmarks, getattr(L, f"{s}_ANKLE")),
+                "elbow": get_xy(landmarks, getattr(L, f"{s}_ELBOW")),
+                "wrist": get_xy(landmarks, getattr(L, f"{s}_WRIST")),
+            }
+
+        knee_angles, elbow_angles = {}, {}
+        for s in ("LEFT", "RIGHT"):
+            knee_angles[s] = calculate_angle(pts[s]["hip"], pts[s]["knee"], pts[s]["ankle"])
+            elbow_angles[s] = calculate_angle(pts[s]["shoulder"], pts[s]["elbow"], pts[s]["wrist"])
+
+        self.last_angles = {
+            "left_knee": round(knee_angles["LEFT"], 1),
+            "right_knee": round(knee_angles["RIGHT"], 1),
+            "left_elbow": round(elbow_angles["LEFT"], 1),
+            "right_elbow": round(elbow_angles["RIGHT"], 1),
+        }
+
+        mid_shoulder = np.mean([pts["LEFT"]["shoulder"], pts["RIGHT"]["shoulder"]], axis=0)
+        mid_hip = np.mean([pts["LEFT"]["hip"], pts["RIGHT"]["hip"]], axis=0)
+        vertical_ref = [mid_hip[0], mid_hip[1] - 0.5]
+        torso_lean = calculate_angle(mid_shoulder, mid_hip, vertical_ref)
+
+        now = time.time()
+        for s in ("LEFT", "RIGHT"):
+            st = self.side[s]
+            if st["stage"] == "down" and knee_angles[s] < self.STEP_UP_ANGLE:
+                st["stage"] = "up"
+                st["peak_elbow"] = elbow_angles[s]
+                st["peak_lean"] = torso_lean
+                self.step_timestamps.append(now)
+                if len(self.step_timestamps) > self.CADENCE_WINDOW:
+                    self.step_timestamps.pop(0)
+            elif st["stage"] == "up":
+                if abs(elbow_angles[s] - self.ELBOW_TARGET) > abs(st["peak_elbow"] - self.ELBOW_TARGET):
+                    st["peak_elbow"] = elbow_angles[s]
+                st["peak_lean"] = max(st["peak_lean"], torso_lean)
+                if knee_angles[s] > self.STEP_DOWN_ANGLE:
+                    st["stage"] = "down"
+                    self._score_step(st["peak_elbow"], st["peak_lean"])
+
+        if len(self.step_timestamps) >= 2:
+            intervals = [t2 - t1 for t1, t2 in zip(self.step_timestamps, self.step_timestamps[1:])]
+            avg_interval = sum(intervals) / len(intervals)
+            self.live_cadence = 60.0 / avg_interval if avg_interval > 0 else 0.0
+
+        form_msgs = []
+        if abs(torso_lean - self.IDEAL_LEAN) > self.LEAN_TOLERANCE:
+            form_msgs.append("Relax into a slight forward lean")
+        if not all(abs(elbow_angles[s] - self.ELBOW_TARGET) <= self.ELBOW_TOLERANCE for s in ("LEFT", "RIGHT")):
+            form_msgs.append("Swing your arms at ~90 degrees")
+        if self.live_cadence and self.live_cadence < self.CADENCE_TARGET - self.CADENCE_TOLERANCE:
+            form_msgs.append("Pick up your turnover")
+
+        if form_msgs:
+            self.form_warnings += 1
+            self.feedback = " | ".join(form_msgs)
+        else:
+            self.feedback = f"Smooth stride! {remaining:.1f}s left"
+
+        if remaining <= 0 and not self.is_done:
+            self.is_done = True
+            self.feedback = f"Done! Form score: {self.quality_score}/100 over {self.reps} steps"
+
+        return self.quality_score, self.feedback
+
+    def _score_step(self, peak_elbow, peak_lean):
+        cadence_component = (
+            35 * clamp(1 - abs(self.live_cadence - self.CADENCE_TARGET) / self.CADENCE_TOLERANCE, 0, 1)
+            if self.live_cadence else 0.0
+        )
+        posture_component = 35 * clamp(1 - abs(peak_lean - self.IDEAL_LEAN) / self.LEAN_TOLERANCE, 0, 1)
+        arm_component = 30 * clamp(1 - abs(peak_elbow - self.ELBOW_TARGET) / self.ELBOW_TOLERANCE, 0, 1)
+        self._record_rep(cadence_component + posture_component + arm_component)
+
+    def snapshot_extra(self):
+        elapsed = 0.0 if self.start_time is None else time.time() - self.start_time
+        return {
+            "angles": self.last_angles,
+            "reps": self.reps,
+            "cadence_spm": round(self.live_cadence, 0),
+            "cadence_pct": round(clamp(self.live_cadence / self.CADENCE_TARGET * 100, 0, 140), 1),
+            "time_remaining": round(max(0.0, self.duration - elapsed), 1),
+            "form_warnings": self.form_warnings,
+        }
+
+
+class HighKneeTest(FitnessTest):
+    """10s high-knee test. Scoring is built from three things measured on
+    every rep:
       - Lift distance: how close the knee gets to hip height, normalized by
         the person's own thigh length (hip-to-knee distance measured while
         the leg is extended), so it works at any distance from the camera.
       - Elbow angle: how close the arm pump sits to an efficient ~90 degrees.
       - Torso lean: how upright the back stays.
-    Reps are still counted, but the headline number is the composite
-    quality_score (0-100), averaged across every rep performed.
     """
 
     KNEE_UP_ANGLE = 110      # hip-knee-ankle angle below this = knee driven up (rep starts)
@@ -163,7 +302,6 @@ class HighKneeTest(FitnessTest):
             "right_elbow": round(elbow_angles["RIGHT"], 1),
         }
 
-        # Posture: torso lean relative to vertical
         mid_shoulder = np.mean([pts["LEFT"]["shoulder"], pts["RIGHT"]["shoulder"]], axis=0)
         mid_hip = np.mean([pts["LEFT"]["hip"], pts["RIGHT"]["hip"]], axis=0)
         vertical_ref = [mid_hip[0], mid_hip[1] - 0.5]
@@ -174,16 +312,14 @@ class HighKneeTest(FitnessTest):
             st = self.side[s]
             hip, knee = pts[s]["hip"], pts[s]["knee"]
 
-            # Continuously (re)calibrate this leg's resting thigh length while it's extended.
             if knee_angles[s] > self.STANDING_ANGLE:
                 thigh_len = float(np.linalg.norm(np.array(hip) - np.array(knee)))
                 st["thigh_ref"] = thigh_len if st["thigh_ref"] is None else (
                     (1 - self.THIGH_REF_ALPHA) * st["thigh_ref"] + self.THIGH_REF_ALPHA * thigh_len
                 )
 
-            # Lift ratio: 0 = knee at rest height, 1.0 = knee level with the hip.
             if st["thigh_ref"] and st["thigh_ref"] > 1e-6:
-                gap = knee[1] - hip[1]  # normally positive (knee below hip in image coords)
+                gap = knee[1] - hip[1]
                 ratio = clamp(1.0 - gap / st["thigh_ref"], 0.0, 1.4)
             else:
                 ratio = 0.0
@@ -205,7 +341,6 @@ class HighKneeTest(FitnessTest):
 
         self.live_lift_pct = live_ratio * 100
 
-        # Live, frame-by-frame coaching feedback (independent of per-rep scoring above)
         form_msgs = []
         if torso_lean > self.TORSO_LEAN_LIMIT:
             form_msgs.append("Chest up, keep your back straight")
@@ -244,102 +379,6 @@ class HighKneeTest(FitnessTest):
         }
 
 
-class SquatTest(FitnessTest):
-    """Bodyweight squat test, scored on depth distance, L/R symmetry, and lockout.
-
-    Depth is measured as how far the hips drop below their standing height,
-    normalized by the person's own standing leg length (hip-to-ankle
-    distance), rather than relying on knee angle alone.
-    """
-
-    DEPTH_ANGLE = 100        # avg knee angle considered "in the hole"
-    LOCKOUT_ANGLE = 160      # avg knee angle considered fully stood up
-    TARGET_DEPTH_RATIO = 0.5  # hips dropping ~50% of leg length scores full marks
-    SYMMETRY_TOLERANCE = 40.0
-
-    REQUIRED_LANDMARKS = [
-        mp_pose.PoseLandmark.LEFT_HIP.value, mp_pose.PoseLandmark.RIGHT_HIP.value,
-        mp_pose.PoseLandmark.LEFT_KNEE.value, mp_pose.PoseLandmark.RIGHT_KNEE.value,
-        mp_pose.PoseLandmark.LEFT_ANKLE.value, mp_pose.PoseLandmark.RIGHT_ANKLE.value,
-    ]
-
-    def __init__(self):
-        super().__init__()
-        self.stage = "up"
-        self.last_angles = {}
-        self.leg_ref = None
-        self.baseline_hip_y = None
-        self.peak_depth_ratio = 0.0
-        self.peak_asymmetry = 0.0
-        self.live_depth_pct = 0.0
-
-    def _run(self, landmarks, frame_shape):
-        if self._avg_visibility(landmarks, self.REQUIRED_LANDMARKS) < self.MIN_VISIBILITY:
-            self.feedback = "Step back so your full body is visible"
-            return self.quality_score, self.feedback
-
-        L = mp_pose.PoseLandmark
-
-        def pt(name, side):
-            return get_xy(landmarks, getattr(L, f"{side}_{name}"))
-
-        l_hip, r_hip = pt("HIP", "LEFT"), pt("HIP", "RIGHT")
-        l_knee, r_knee = pt("KNEE", "LEFT"), pt("KNEE", "RIGHT")
-        l_ankle, r_ankle = pt("ANKLE", "LEFT"), pt("ANKLE", "RIGHT")
-
-        left_angle = calculate_angle(l_hip, l_knee, l_ankle)
-        right_angle = calculate_angle(r_hip, r_knee, r_ankle)
-        avg_angle = (left_angle + right_angle) / 2
-        asymmetry = abs(left_angle - right_angle)
-
-        self.last_angles = {"left_knee": round(left_angle, 1), "right_knee": round(right_angle, 1)}
-
-        avg_hip_y = (l_hip[1] + r_hip[1]) / 2
-        avg_ankle_y = (l_ankle[1] + r_ankle[1]) / 2
-        leg_len = abs(avg_ankle_y - avg_hip_y)
-
-        # Calibrate standing reference (leg length + hip height) while standing tall
-        if avg_angle > self.LOCKOUT_ANGLE - 5:
-            self.leg_ref = leg_len if self.leg_ref is None else (0.85 * self.leg_ref + 0.15 * leg_len)
-            self.baseline_hip_y = avg_hip_y if self.baseline_hip_y is None else (0.85 * self.baseline_hip_y + 0.15 * avg_hip_y)
-
-        depth_ratio = 0.0
-        if self.leg_ref and self.baseline_hip_y is not None and self.leg_ref > 1e-6:
-            depth_ratio = clamp((avg_hip_y - self.baseline_hip_y) / self.leg_ref, 0.0, 1.2)
-        self.live_depth_pct = depth_ratio * 100
-
-        if avg_angle < self.DEPTH_ANGLE:
-            self.stage = "down"
-            self.peak_depth_ratio = max(self.peak_depth_ratio, depth_ratio)
-            self.peak_asymmetry = max(self.peak_asymmetry, asymmetry)
-            if asymmetry > self.SYMMETRY_TOLERANCE:
-                self.feedback = "Even out your weight, one knee is leading"
-            else:
-                self.feedback = "Good depth — now drive up"
-        elif avg_angle > self.LOCKOUT_ANGLE and self.stage == "down":
-            self.stage = "up"
-            self._score_rep(self.peak_depth_ratio, self.peak_asymmetry)
-            self.feedback = "Lockout! Nice rep."
-            self.peak_depth_ratio = 0.0
-            self.peak_asymmetry = 0.0
-        elif self.stage == "up":
-            self.feedback = "Break at the hips, squat down"
-
-        return self.quality_score, self.feedback
-
-    def _score_rep(self, peak_depth_ratio, peak_asymmetry):
-        depth_component = 60 * clamp(peak_depth_ratio / self.TARGET_DEPTH_RATIO, 0, 1)
-        symmetry_component = 40 * max(0.0, 1 - peak_asymmetry / self.SYMMETRY_TOLERANCE)
-        self._record_rep(depth_component + symmetry_component)
-
-    def snapshot_extra(self):
-        return {
-            "angles": self.last_angles,
-            "reps": self.reps,
-            "depth_pct": round(self.live_depth_pct, 1),
-        }
-
-
 class JumpTest(FitnessTest):
     """Vertical jump test, scored on jump height distance.
 
@@ -348,7 +387,7 @@ class JumpTest(FitnessTest):
     that as a real-world ruler (assuming an average adult leg length) to
     convert vertical foot displacement into approximate centimeters.
     quality_score maps the best jump against a target height, so it reads on
-    the same 0-100 scale as the other two tests.
+    the same 0-100 scale as the other events.
     """
 
     CALIBRATION_TIME = 2.0
@@ -440,10 +479,184 @@ class JumpTest(FitnessTest):
         }
 
 
+class PushUpTest(FitnessTest):
+    """Push-up test scored on depth (elbow bend) and body-line straightness
+    (no hip sag or piking). Works best with the camera angled to see enough
+    of a side profile that the shoulder-hip-ankle line is visible."""
+
+    DOWN_ELBOW_ANGLE = 100    # elbow angle below this = descending into a rep
+    UP_ELBOW_ANGLE = 160      # elbow angle above this = locked out at the top
+    FULL_DEPTH_ANGLE = 70.0   # elbow bent to this = full depth, scores max
+    SHALLOW_DEPTH_ANGLE = 100.0
+    LINE_TOLERANCE = 35.0     # allowed deviation from a straight 180 degree body line
+
+    REQUIRED_LANDMARKS = [
+        mp_pose.PoseLandmark.LEFT_SHOULDER.value, mp_pose.PoseLandmark.RIGHT_SHOULDER.value,
+        mp_pose.PoseLandmark.LEFT_ELBOW.value, mp_pose.PoseLandmark.RIGHT_ELBOW.value,
+        mp_pose.PoseLandmark.LEFT_WRIST.value, mp_pose.PoseLandmark.RIGHT_WRIST.value,
+        mp_pose.PoseLandmark.LEFT_HIP.value, mp_pose.PoseLandmark.RIGHT_HIP.value,
+        mp_pose.PoseLandmark.LEFT_ANKLE.value, mp_pose.PoseLandmark.RIGHT_ANKLE.value,
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.stage = "up"
+        self.last_angles = {}
+        self.peak_min_elbow = 180.0
+        self.peak_line_angle = 180.0
+        self.live_depth_pct = 0.0
+
+    def _run(self, landmarks, frame_shape):
+        if self._avg_visibility(landmarks, self.REQUIRED_LANDMARKS) < self.MIN_VISIBILITY:
+            self.feedback = "Make sure your shoulders, elbows, hips and ankles are all visible"
+            return self.quality_score, self.feedback
+
+        L = mp_pose.PoseLandmark
+
+        def pt(name, side):
+            return get_xy(landmarks, getattr(L, f"{side}_{name}"))
+
+        elbow_angles = {}
+        for s in ("LEFT", "RIGHT"):
+            elbow_angles[s] = calculate_angle(pt("SHOULDER", s), pt("ELBOW", s), pt("WRIST", s))
+        avg_elbow = (elbow_angles["LEFT"] + elbow_angles["RIGHT"]) / 2
+
+        line_angles = [calculate_angle(pt("SHOULDER", s), pt("HIP", s), pt("ANKLE", s)) for s in ("LEFT", "RIGHT")]
+        avg_line = sum(line_angles) / len(line_angles)
+
+        self.last_angles = {
+            "left_elbow": round(elbow_angles["LEFT"], 1),
+            "right_elbow": round(elbow_angles["RIGHT"], 1),
+            "body_line": round(avg_line, 1),
+        }
+
+        self.live_depth_pct = 100 * clamp(
+            (self.SHALLOW_DEPTH_ANGLE - avg_elbow) / (self.SHALLOW_DEPTH_ANGLE - self.FULL_DEPTH_ANGLE), 0, 1
+        )
+
+        if avg_elbow < self.DOWN_ELBOW_ANGLE:
+            self.stage = "down"
+            self.peak_min_elbow = min(self.peak_min_elbow, avg_elbow)
+            if abs(180 - avg_line) > abs(180 - self.peak_line_angle):
+                self.peak_line_angle = avg_line
+            self.feedback = "Good depth — press up!" if abs(180 - avg_line) < self.LINE_TOLERANCE else "Keep your hips in line"
+        elif avg_elbow > self.UP_ELBOW_ANGLE and self.stage == "down":
+            self.stage = "up"
+            self._score_rep(self.peak_min_elbow, self.peak_line_angle)
+            self.feedback = "Rep complete — nice lockout"
+            self.peak_min_elbow = 180.0
+            self.peak_line_angle = 180.0
+        elif self.stage == "up":
+            self.feedback = "Lower down with control"
+
+        return self.quality_score, self.feedback
+
+    def _score_rep(self, peak_min_elbow, peak_line_angle):
+        depth_component = 60 * clamp(
+            (self.SHALLOW_DEPTH_ANGLE - peak_min_elbow) / (self.SHALLOW_DEPTH_ANGLE - self.FULL_DEPTH_ANGLE), 0, 1
+        )
+        line_component = 40 * max(0.0, 1 - abs(180 - peak_line_angle) / self.LINE_TOLERANCE)
+        self._record_rep(depth_component + line_component)
+
+    def snapshot_extra(self):
+        return {
+            "angles": self.last_angles,
+            "reps": self.reps,
+            "depth_pct": round(self.live_depth_pct, 1),
+        }
+
+
+class PlankTest(FitnessTest):
+    """Timed plank hold, scored on how straight the body line stays
+    (shoulder-hip-ankle angle close to 180 degrees) and how steady the hips
+    stay (low wobble) over the hold. Graded once per second rather than per
+    rep, since a plank has no discrete reps."""
+
+    LINE_TOLERANCE = 35.0
+    SAMPLE_INTERVAL = 1.0      # seconds between graded samples
+    STABILITY_WINDOW = 15      # number of recent hip-height readings kept
+    STABILITY_TOLERANCE = 0.015
+
+    REQUIRED_LANDMARKS = [
+        mp_pose.PoseLandmark.LEFT_SHOULDER.value, mp_pose.PoseLandmark.RIGHT_SHOULDER.value,
+        mp_pose.PoseLandmark.LEFT_HIP.value, mp_pose.PoseLandmark.RIGHT_HIP.value,
+        mp_pose.PoseLandmark.LEFT_ANKLE.value, mp_pose.PoseLandmark.RIGHT_ANKLE.value,
+    ]
+
+    def __init__(self, duration=30.0):
+        super().__init__()
+        self.duration = duration
+        self.start_time = None
+        self.last_sample_time = None
+        self.hip_y_history = []
+        self.last_angles = {}
+        self.live_form_pct = 0.0
+
+    def start(self):
+        super().start()
+        self.start_time = time.time()
+        self.last_sample_time = self.start_time
+
+    def _run(self, landmarks, frame_shape):
+        elapsed = time.time() - self.start_time
+        remaining = max(0.0, self.duration - elapsed)
+
+        if self._avg_visibility(landmarks, self.REQUIRED_LANDMARKS) < self.MIN_VISIBILITY:
+            self.feedback = "Make sure your shoulders, hips and ankles are all visible"
+            return self.quality_score, self.feedback
+
+        L = mp_pose.PoseLandmark
+
+        def pt(name, side):
+            return get_xy(landmarks, getattr(L, f"{side}_{name}"))
+
+        line_angles = [calculate_angle(pt("SHOULDER", s), pt("HIP", s), pt("ANKLE", s)) for s in ("LEFT", "RIGHT")]
+        avg_line = sum(line_angles) / len(line_angles)
+        self.last_angles = {"body_line": round(avg_line, 1)}
+
+        avg_hip_y = (pt("HIP", "LEFT")[1] + pt("HIP", "RIGHT")[1]) / 2
+        self.hip_y_history.append(avg_hip_y)
+        if len(self.hip_y_history) > self.STABILITY_WINDOW:
+            self.hip_y_history.pop(0)
+        wobble = float(np.std(self.hip_y_history)) if len(self.hip_y_history) >= 3 else 0.0
+
+        line_score = 100 * max(0.0, 1 - abs(180 - avg_line) / self.LINE_TOLERANCE)
+        self.live_form_pct = line_score
+
+        if abs(180 - avg_line) > self.LINE_TOLERANCE * 0.6:
+            self.feedback = "Straighten your line — don't let your hips sag or pike"
+        else:
+            self.feedback = f"Solid hold! {remaining:.1f}s left"
+
+        now = time.time()
+        if now - self.last_sample_time >= self.SAMPLE_INTERVAL:
+            self.last_sample_time = now
+            stability_score = 100 * max(0.0, 1 - wobble / self.STABILITY_TOLERANCE)
+            sample_score = 0.7 * line_score + 0.3 * stability_score
+            self._record_rep(sample_score)
+
+        if remaining <= 0 and not self.is_done:
+            self.is_done = True
+            self.feedback = f"Done! Hold form score: {self.quality_score}/100 over {self.duration:.0f}s"
+
+        return self.quality_score, self.feedback
+
+    def snapshot_extra(self):
+        elapsed = 0.0 if self.start_time is None else time.time() - self.start_time
+        return {
+            "angles": self.last_angles,
+            "reps": self.reps,  # number of graded 1s samples — shown as "checks" in the UI
+            "form_pct": round(self.live_form_pct, 1),
+            "time_remaining": round(max(0.0, self.duration - elapsed), 1),
+        }
+
+
 TEST_REGISTRY = {
-    "high_knees": lambda: HighKneeTest(duration=10.0),
-    "squat": lambda: SquatTest(),
+    "running_spot": lambda: RunningInPlaceTest(duration=10.0),
     "jump": lambda: JumpTest(duration=15.0),
+    "high_knees": lambda: HighKneeTest(duration=10.0),
+    "pushup": lambda: PushUpTest(),
+    "plank": lambda: PlankTest(duration=30.0),
 }
 
 
@@ -528,7 +741,7 @@ def generate_live_stream():
             warn = False
             if results.pose_landmarks and test and not test.is_done:
                 score, feedback = test.process_frame(results.pose_landmarks.landmark, frame.shape)
-                warn = ("|" in feedback) or ("Step back" in feedback) or ("still" in feedback.lower())
+                warn = ("|" in feedback) or ("Step back" in feedback) or ("still" in feedback.lower()) or ("Make sure" in feedback)
 
                 with live_state._lock:
                     live_state.current_score = score

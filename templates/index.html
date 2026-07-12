@@ -71,7 +71,8 @@
   .hud-bottom.good span{ color: var(--cyan); }
 
   .events{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
-  @media (max-width: 640px){ .events{ grid-template-columns: 1fr; } }
+  @media (max-width: 780px){ .events{ grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px){ .events{ grid-template-columns: 1fr; } }
 
   .event-btn{
     text-align:left; background: var(--panel); border: 1px solid var(--panel-border);
@@ -102,13 +103,12 @@
   .gauge-num{ font-family:'JetBrains Mono', monospace; font-size: 15px; }
   .gauge-label{ font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
-  .jump-meter{ display:flex; flex-direction:column; gap: 8px; }
-  .dist-meter{ display:flex; flex-direction:column; gap: 8px; }
+  .dist-meter, .jump-meter{ display:flex; flex-direction:column; gap: 8px; }
   .dist-label{ font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .jump-bar-track{ height: 14px; border-radius: 999px; background: var(--panel-border); overflow:hidden; }
-  .jump-bar-fill{ height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--amber)); transition: width .25s ease; }
-  .jump-readout{ display:flex; justify-content: space-between; font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--muted); }
-  .jump-readout b{ color: var(--text); font-weight:600; }
+  .bar-track{ height: 14px; border-radius: 999px; background: var(--panel-border); overflow:hidden; }
+  .bar-fill{ height: 100%; width: 0%; background: linear-gradient(90deg, var(--cyan), var(--amber)); transition: width .25s ease; }
+  .bar-readout{ display:flex; justify-content: space-between; font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--muted); }
+  .bar-readout b{ color: var(--text); font-weight:600; }
 
   .actions{ display:flex; flex-direction:column; gap: 10px; }
   button.btn-primary, button.btn-secondary{
@@ -135,10 +135,11 @@
     font-family:'JetBrains Mono', monospace; font-size: 12px; color: var(--cyan);
     border: 1px solid rgba(63,208,201,0.4); padding: 4px 10px; border-radius: 999px;
   }
-  .stat-row{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .stat-row{ display:grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  @media (max-width: 780px){ .stat-row{ grid-template-columns: repeat(2, 1fr); } }
   .stat-box{ background: var(--bg); border: 1px solid var(--panel-border); border-radius: 10px; padding: 14px; text-align:center; }
-  .stat-box .num{ font-family:'JetBrains Mono', monospace; font-size: 24px; color: var(--text); }
-  .stat-box .lbl{ font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .stat-box .num{ font-family:'JetBrains Mono', monospace; font-size: 22px; color: var(--text); }
+  .stat-box .lbl{ font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
   .report-footnote{ font-size: 11px; color: var(--muted); margin-top: 18px; }
 </style>
 </head>
@@ -146,7 +147,7 @@
   <div class="app">
     <header class="topbar">
       <div class="brand"><span class="brand-mark">&#9670;</span>Combine<span class="accent">AI</span></div>
-      <div class="tagline">Vision-based scouting combine — form-first scoring from joint angles and lift/depth distance, not just rep count</div>
+      <div class="tagline">Vision-based scouting combine — form-first scoring from joint angles and movement distance, not just rep count</div>
     </header>
 
     <main class="layout">
@@ -155,26 +156,36 @@
           <img src="/video_feed" alt="Live camera feed with pose overlay">
           <div class="hud hud-top">
             <div class="hud-chip" id="hudTimer">--</div>
-            <div class="hud-chip hud-score"><span id="hudScore">0</span><label>&nbsp;SCORE</label><label class="hud-reps" id="hudReps">&nbsp;· 0 reps</label></div>
+            <div class="hud-chip hud-score"><span id="hudScore">0</span><label>&nbsp;SCORE</label><label class="hud-reps" id="hudReps">&nbsp;· 0</label></div>
           </div>
           <div class="hud hud-bottom" id="hudFeedback"><span>Press Start when you're ready</span></div>
         </div>
 
         <div class="events">
-          <button class="event-btn active" data-mode="high_knees" onclick="setMode('high_knees', this)">
+          <button class="event-btn active" data-mode="running_spot" onclick="setMode('running_spot', this)">
             <span class="event-index">EVENT 01</span>
-            <span class="event-name">High Knees</span>
-            <span class="event-desc">10s max effort — knee drive &amp; arm pump scored</span>
-          </button>
-          <button class="event-btn" data-mode="squat" onclick="setMode('squat', this)">
-            <span class="event-index">EVENT 02</span>
-            <span class="event-name">Squat Test</span>
-            <span class="event-desc">Depth, lockout, and left/right symmetry</span>
+            <span class="event-name">Running in Place</span>
+            <span class="event-desc">10s — cadence, posture &amp; arm swing form</span>
           </button>
           <button class="event-btn" data-mode="jump" onclick="setMode('jump', this)">
-            <span class="event-index">EVENT 03</span>
+            <span class="event-index">EVENT 02</span>
             <span class="event-name">Vertical Jump</span>
-            <span class="event-desc">15s window — best jump height in cm</span>
+            <span class="event-desc">15s — best jump height, measured in cm</span>
+          </button>
+          <button class="event-btn" data-mode="high_knees" onclick="setMode('high_knees', this)">
+            <span class="event-index">EVENT 03</span>
+            <span class="event-name">High Knees</span>
+            <span class="event-desc">10s — knee lift distance &amp; arm pump form</span>
+          </button>
+          <button class="event-btn" data-mode="pushup" onclick="setMode('pushup', this)">
+            <span class="event-index">EVENT 04</span>
+            <span class="event-name">Push-Ups</span>
+            <span class="event-desc">Elbow depth &amp; body-line straightness</span>
+          </button>
+          <button class="event-btn" data-mode="plank" onclick="setMode('plank', this)">
+            <span class="event-index">EVENT 05</span>
+            <span class="event-name">Plank Hold</span>
+            <span class="event-desc">30s — straight-line form &amp; steadiness</span>
           </button>
         </div>
       </section>
@@ -185,14 +196,14 @@
         <div class="gauges" id="gauges"><!-- populated by JS --></div>
 
         <div class="dist-meter" id="distMeter" style="display:none;">
-          <div class="dist-label" id="distLabel">Knee lift</div>
-          <div class="jump-bar-track"><div class="jump-bar-fill" id="distBarFill"></div></div>
-          <div class="jump-readout"><span id="distReadout">0%</span><span>target: <b>100%</b></span></div>
+          <div class="dist-label" id="distLabel">Metric</div>
+          <div class="bar-track"><div class="bar-fill" id="distBarFill"></div></div>
+          <div class="bar-readout"><span id="distReadout">0%</span><span>target: <b>100%</b></span></div>
         </div>
 
         <div class="jump-meter" id="jumpMeter" style="display:none;">
-          <div class="jump-bar-track"><div class="jump-bar-fill" id="jumpBarFill"></div></div>
-          <div class="jump-readout">
+          <div class="bar-track"><div class="bar-fill" id="jumpBarFill"></div></div>
+          <div class="bar-readout">
             <span>Last: <b id="jumpLast">0</b> cm</span>
             <span>Best: <b id="jumpBest">0</b> cm</span>
           </div>
@@ -214,9 +225,11 @@
       <div class="sport" id="sportRec"></div>
       <div class="traits" id="traits"></div>
       <div class="stat-row">
-        <div class="stat-box"><div class="num" id="runStat">0</div><div class="lbl">High Knees Form /100</div></div>
-        <div class="stat-box"><div class="num" id="squatStat">0</div><div class="lbl">Squat Form /100</div></div>
+        <div class="stat-box"><div class="num" id="runStat">0</div><div class="lbl">Running Form /100</div></div>
         <div class="stat-box"><div class="num" id="jumpStat">0</div><div class="lbl">Best Jump (cm)</div></div>
+        <div class="stat-box"><div class="num" id="kneeStat">0</div><div class="lbl">High Knees /100</div></div>
+        <div class="stat-box"><div class="num" id="pushupStat">0</div><div class="lbl">Push-Ups /100</div></div>
+        <div class="stat-box"><div class="num" id="plankStat">0</div><div class="lbl">Plank /100</div></div>
       </div>
       <p class="report-footnote">Screenshot this and send it to your coach.</p>
     </section>
@@ -224,9 +237,28 @@
 
 <script>
   const GAUGE_MAX_ANGLE = 180;
-  const gaugeLabels = { left_knee: "L KNEE", right_knee: "R KNEE", left_elbow: "L ELBOW", right_elbow: "R ELBOW" };
+  const gaugeLabels = {
+    left_knee: "L KNEE", right_knee: "R KNEE",
+    left_elbow: "L ELBOW", right_elbow: "R ELBOW",
+    body_line: "BODY LINE",
+  };
   const gaugeState = {}; // key -> { circle, num }
-  let currentMode = "high_knees";
+  let currentMode = "running_spot";
+
+  // Which extra fields to show as gauges / a distance-style bar per event.
+  // "gauges" lists which angle keys (from data.angles) to render as dials.
+  // "dist" (optional) points at a live 0-100(+)-scale field for the bar meter.
+  const eventConfig = {
+    running_spot: { gauges: ["left_elbow", "right_elbow"], dist: { label: "Cadence", key: "cadence_pct" } },
+    jump:         { gauges: [], jumpMeter: true },
+    high_knees:   { gauges: ["left_knee", "right_knee", "left_elbow", "right_elbow"], dist: { label: "Knee lift", key: "lift_pct" } },
+    pushup:       { gauges: ["left_elbow", "right_elbow", "body_line"], dist: { label: "Push-up depth", key: "depth_pct" } },
+    plank:        { gauges: ["body_line"], dist: { label: "Line & steadiness", key: "form_pct" } },
+  };
+
+  const repLabels = {
+    running_spot: "steps", jump: "jumps", high_knees: "reps", pushup: "reps", plank: "checks",
+  };
 
   function buildGauge(key) {
     const wrap = document.createElement('div');
@@ -264,22 +296,18 @@
     startBtn.disabled = started;
   }
 
-  const distConfig = {
-    high_knees: { label: "Knee lift", key: "lift_pct" },
-    squat: { label: "Squat depth", key: "depth_pct" },
-  };
-
   function setMode(mode, btnEl) {
     currentMode = mode;
     document.querySelectorAll('.event-btn').forEach(b => b.classList.remove('active'));
     if (btnEl) btnEl.classList.add('active');
     clearGauges();
-    const isJump = mode === 'jump';
-    const dist = distConfig[mode];
-    document.getElementById('jumpMeter').style.display = isJump ? 'flex' : 'none';
-    document.getElementById('gauges').style.display = isJump ? 'none' : 'grid';
-    document.getElementById('distMeter').style.display = dist ? 'flex' : 'none';
-    if (dist) document.getElementById('distLabel').textContent = dist.label;
+
+    const cfg = eventConfig[mode] || {};
+    document.getElementById('jumpMeter').style.display = cfg.jumpMeter ? 'flex' : 'none';
+    document.getElementById('gauges').style.display = cfg.jumpMeter ? 'none' : 'grid';
+    document.getElementById('distMeter').style.display = cfg.dist ? 'flex' : 'none';
+    if (cfg.dist) document.getElementById('distLabel').textContent = cfg.dist.label;
+    document.getElementById('hudReps').textContent = `\u00A0\u00B7 0 ${repLabels[mode] || 'reps'}`;
     setStartButtonState(false);
 
     fetch('/set_mode', {
@@ -309,7 +337,7 @@
         document.getElementById('jumpBest').textContent = '0';
         document.getElementById('distBarFill').style.width = '0%';
         document.getElementById('distReadout').textContent = '0%';
-        document.getElementById('hudReps').textContent = '\u00A0\u00B7 0 reps';
+        document.getElementById('hudReps').textContent = `\u00A0\u00B7 0 ${repLabels[currentMode] || 'reps'}`;
         setStartButtonState(false);
         document.getElementById('systemStatus').textContent = "Reset — press Start when ready.";
       });
@@ -330,8 +358,10 @@
         document.getElementById('traits').innerHTML =
           data.skills.map(s => `<span class="trait-tag">${s}</span>`).join('');
         document.getElementById('runStat').textContent = data.run_stat;
-        document.getElementById('squatStat').textContent = data.squat_stat;
         document.getElementById('jumpStat').textContent = data.jump_stat;
+        document.getElementById('kneeStat').textContent = data.knee_stat;
+        document.getElementById('pushupStat').textContent = data.pushup_stat;
+        document.getElementById('plankStat').textContent = data.plank_stat;
         document.getElementById('profileCard').scrollIntoView({behavior: 'smooth', block: 'start'});
       });
   }
@@ -342,8 +372,8 @@
 
       const fbEl = document.getElementById('hudFeedback');
       fbEl.innerHTML = `<span>${data.feedback || ''}</span>`;
-      fbEl.classList.toggle('warn', /step back|calibrat|no person/i.test(data.feedback || ''));
-      fbEl.classList.toggle('good', /great form|calibrated|lockout/i.test(data.feedback || ''));
+      fbEl.classList.toggle('warn', /step back|calibrat|no person|make sure/i.test(data.feedback || ''));
+      fbEl.classList.toggle('good', /great form|calibrated|lockout|smooth stride|solid hold/i.test(data.feedback || ''));
 
       const timerEl = document.getElementById('hudTimer');
       if (typeof data.time_remaining === 'number') {
@@ -357,12 +387,12 @@
       }
 
       if (typeof data.reps === 'number') {
-        document.getElementById('hudReps').textContent = `\u00A0\u00B7 ${data.reps} reps`;
+        document.getElementById('hudReps').textContent = `\u00A0\u00B7 ${data.reps} ${repLabels[currentMode] || 'reps'}`;
       }
 
-      const dist = distConfig[currentMode];
-      if (dist && typeof data[dist.key] === 'number') {
-        const pct = Math.max(0, Math.min(140, data[dist.key]));
+      const cfg = eventConfig[currentMode] || {};
+      if (cfg.dist && typeof data[cfg.dist.key] === 'number') {
+        const pct = Math.max(0, Math.min(140, data[cfg.dist.key]));
         document.getElementById('distBarFill').style.width = Math.min(100, pct) + '%';
         document.getElementById('distReadout').textContent = Math.round(pct) + '%';
       }
