@@ -356,6 +356,7 @@
   let uploadTimelineIdx = 0;
   let localPreviewUrl = null;
   let lastKnownSnapshot = null;
+  let currentReplayFilename = null; // server-side annotated video, if any, from the last upload
 
   // Realtime Timer variables
   let localTimeRemaining = 0;
@@ -502,6 +503,8 @@
       replay.classList.add('hidden');
       replay.removeAttribute('src');
       if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      deleteReplayVideo(currentReplayFilename);
+      currentReplayFilename = null;
       uploadTimeline = [];
       uploadTimelineIdx = 0;
       document.getElementById('dropZone').classList.remove('hidden');
@@ -593,6 +596,18 @@
   }
 
   // --- Upload-instead-of-webcam ---
+
+  // Tells the server to delete a previously generated annotated replay once
+  // it's no longer needed, so processed clips don't pile up in static/uploads.
+  function deleteReplayVideo(filename) {
+    if (!filename) return;
+    fetch('/delete_video', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({filename})
+    }).catch(() => {});
+  }
+
   function resetDropZone() {
     document.getElementById('dropZoneText').textContent = "Drag & drop a video here";
     document.getElementById('dropZoneSub').textContent = "or click to browse";
@@ -617,6 +632,8 @@
       replay.classList.add('hidden');
       replay.removeAttribute('src');
       if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      deleteReplayVideo(currentReplayFilename);
+      currentReplayFilename = null;
       uploadTimeline = [];
       uploadTimelineIdx = 0;
 
@@ -633,6 +650,8 @@
       replay.classList.add('hidden');
       replay.removeAttribute('src');
       if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      deleteReplayVideo(currentReplayFilename);
+      currentReplayFilename = null;
       uploadTimeline = [];
       uploadTimelineIdx = 0;
 
@@ -697,6 +716,11 @@
     uploadTimeline = [];
     uploadTimelineIdx = 0;
 
+    // Done with any previously processed replay — delete it server-side so
+    // annotated clips don't pile up in static/uploads.
+    deleteReplayVideo(currentReplayFilename);
+    currentReplayFilename = null;
+
     // Show the raw clip immediately (rather than a blank drop zone) so
     // there's always something on screen while the server analyzes it.
     if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
@@ -736,6 +760,7 @@
         replay.src = data.video_url;
         replay.classList.remove('hidden');
         replay.play().catch(() => {});
+        currentReplayFilename = data.video_url.split('/').pop();
 
         uploadTimeline = data.timeline || [];
         uploadTimelineIdx = 0;
@@ -935,6 +960,17 @@
       }
     }
   }
+
+  // Best-effort cleanup if the user closes the tab or navigates away with an
+  // annotated replay still sitting server-side — sendBeacon fires reliably
+  // even though the page is unloading, unlike a normal fetch().
+  window.addEventListener('pagehide', () => {
+    if (!currentReplayFilename) return;
+    navigator.sendBeacon(
+      '/delete_video',
+      new Blob([JSON.stringify({filename: currentReplayFilename})], {type: 'application/json'})
+    );
+  });
 
   // Initialize
   initUploadDropZone();

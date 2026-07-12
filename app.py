@@ -142,6 +142,25 @@ def upload_video():
     })
 
 
+@app.route('/delete_video', methods=['POST'])
+def delete_video():
+    """Deletes a previously generated annotated replay from static/uploads.
+    The frontend calls this once a replay is no longer needed — a new
+    upload replaces it, the user switches events, or leaves upload mode —
+    so processed clips don't pile up on disk indefinitely."""
+    data = request.json or {}
+    filename = secure_filename(data.get("filename", ""))
+
+    # Only ever delete files this app generated itself.
+    if not filename.startswith("annotated_"):
+        return jsonify({"status": "error", "message": "Invalid filename"}), 400
+
+    path = os.path.join(UPLOAD_DIR, filename)
+    if os.path.exists(path):
+        os.remove(path)
+    return jsonify({"status": "deleted"})
+
+
 @app.route('/live_stats')
 def live_stats():
     """
