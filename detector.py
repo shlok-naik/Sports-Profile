@@ -747,3 +747,71 @@ def generate_live_stream():
         pose.close()
         live_state.stream_active = False
         live_state.is_streaming = False
+
+
+def process_video_file(input_path, output_path, mode):
+    """Run an uploaded video through the given test end-to-end: writes an
+    annotated (skeleton-overlaid) copy to output_path and updates live_state
+    with the final score/feedback via the exact same scoring path used by
+    the live webcam, so results are consistent between the two.
+
+    Test duration cutoffs are measured against the video's own timestamps
+    (frame_index / fps) rather than wall-clock time, since processing runs
+    faster or slower than real playback depending on the machine.
+    """
+    live_state.set_test(mode)
+    live_state.start_test()
+
+    pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        pose.close()
+        raise ValueError(f"Could not open video file: {input_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
+
+    frame_index = 0
+    try:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose.process(rgb_frame)
+
+            with live_state._lock:
+                test = live_state.active_test
+                # Anchor the test's internal clock to this frame's position in the
+                # video, not to wall-clock time, so timed tests (10s/15s/30s) score
+                # against video content rather than however fast this loop runs.
+                if test is not None and getattr(test, "start_time", None) is not None:
+                    test.start_time = time.time() - (frame_index / fps)
+
+                if results.pose_landmarks and test and not test.is_done:
+                    score, feedback = test.process_frame(results.pose_landmarks.landmark, frame.shape)
+
+                    live_state.current_score = score
+                    live_state.current_feedback = feedback
+                    live_state.current_extra = test.snapshot_extra()
+                    live_state.is_done = test.is_done
+
+                    mp_drawing.draw_landmarks(
+                        frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                        landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style(),
+                    )
+
+            writer.write(frame)
+            frame_index += 1
+    finally:
+        cap.release()
+        writer.release()
+        pose.close()
+
+    with live_state._lock:
+        live_state.is_done = True
+        if live_state.active_test:
+            live_state.active_test.is_done = True

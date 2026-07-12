@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>CombineAI Scout Dashboard</title>
+
+<style>
+
+body{
+    background:#0b0e14;
+    color:white;
+    font-family:Arial, sans-serif;
+    padding:40px;
+}
+
+
+h1{
+    color:#f2a93b;
+    margin-bottom:30px;
+}
+
+
+.filters{
+    background:#12161f;
+    padding:20px;
+    border-radius:15px;
+    display:flex;
+    gap:15px;
+    margin-bottom:30px;
+    flex-wrap:wrap;
+}
+
+
+input,select{
+
+    background:#0b0e14;
+    border:1px solid #333;
+    color:white;
+    padding:10px;
+    border-radius:8px;
+
+}
+
+
+.card{
+
+    background:#12161f;
+    border:1px solid #232838;
+    padding:20px;
+    border-radius:15px;
+    margin:15px 0;
+
+}
+
+
+.card:hover{
+
+    border-color:#3fd0c9;
+    transform:translateY(-2px);
+    transition:0.2s;
+
+}
+
+
+
+.metric{
+
+    margin:15px 0;
+
+}
+
+
+.bar{
+
+    height:10px;
+    background:#232838;
+    border-radius:20px;
+    overflow:hidden;
+
+}
+
+
+.fill{
+
+    height:100%;
+    background:#3fd0c9;
+
+}
+
+
+.tag{
+
+    color:#f2a93b;
+    font-weight:bold;
+
+}
+
+
+.stat-grid{
+
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:15px;
+
+}
+
+
+.stat{
+
+    background:#0b0e14;
+    padding:12px;
+    border-radius:10px;
+
+}
+
+
+
+.empty{
+
+    color:#888;
+    text-align:center;
+    padding:40px;
+
+}
+
+
+button{
+
+    background:#f2a93b;
+    border:none;
+    padding:10px 15px;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:bold;
+
+}
+
+
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<h1>
+🏟 CombineAI Scout Dashboard
+</h1>
+
+
+<p>
+Search and compare athletes based on CombineAI performance data.
+</p>
+
+
+
+<div class="filters">
+
+
+<select id="sport">
+
+<option value="all">
+All Sports
+</option>
+
+<option value="Basketball / Volleyball">
+Basketball / Volleyball
+</option>
+
+<option value="Sprinting / Soccer">
+Sprinting / Soccer
+</option>
+
+<option value="Strength Sports">
+Strength Sports
+</option>
+
+<option value="Gymnastics / CrossFit">
+Gymnastics / CrossFit
+</option>
+
+</select>
+
+
+
+<select id="sort">
+
+
+<option value="none">
+Sort athletes
+</option>
+
+
+<option value="jump">
+Highest Jump
+</option>
+
+
+<option value="running">
+Best Running
+</option>
+
+
+<option value="strength">
+Strongest
+</option>
+
+
+<option value="overall">
+Overall Athlete
+</option>
+
+
+</select>
+
+
+
+<input 
+id="search"
+placeholder="Search athlete...">
+
+
+
+</div>
+
+
+
+<h2 id="count">
+Loading athletes...
+</h2>
+
+
+
+<div id="list"></div>
+
+
+
+<script>
+
+
+let athletes=[];
+
+
+
+async function loadAthletes(){
+
+
+try{
+
+
+let response = await fetch("/athletes");
+
+
+athletes = await response.json();
+
+
+render();
+
+
+}
+
+
+catch(error){
+
+
+console.log(error);
+
+
+document.getElementById("list").innerHTML =
+`
+<div class="empty">
+Could not load athlete database.
+</div>
+`;
+
+
+}
+
+
+}
+
+
+
+
+
+function render(){
+
+
+let sport =
+document.getElementById("sport").value;
+
+
+let sort =
+document.getElementById("sort").value;
+
+
+let search =
+document.getElementById("search").value.toLowerCase();
+
+
+
+let filtered = athletes.filter(a=>{
+
+
+return (
+
+(sport=="all" || a.sport==sport)
+
+&&
+
+a.name.toLowerCase().includes(search)
+
+);
+
+
+});
+
+
+
+
+
+if(sort!="none"){
+
+
+filtered.sort((a,b)=>{
+
+
+if(sort=="jump")
+return b.jump-a.jump;
+
+
+
+if(sort=="running")
+return b.running-a.running;
+
+
+
+if(sort=="strength")
+return b.pushups-a.pushups;
+
+
+
+if(sort=="overall"){
+
+
+let scoreA =
+a.running +
+a.high_knees +
+a.pushups +
+a.plank +
+(a.jump/2);
+
+
+
+let scoreB =
+b.running +
+b.high_knees +
+b.pushups +
+b.plank +
+(b.jump/2);
+
+
+
+return scoreB-scoreA;
+
+
+}
+
+
+
+});
+
+
+}
+
+
+
+
+
+document.getElementById("count").innerHTML =
+`${filtered.length} athletes found`;
+
+
+
+
+
+if(filtered.length==0){
+
+
+document.getElementById("list").innerHTML =
+`
+<div class="empty">
+No athletes match your filters.
+</div>
+`;
+
+
+return;
+
+
+}
+
+
+
+
+
+document.getElementById("list").innerHTML = filtered.map(a=>`
+
+
+<div class="card">
+
+
+<h2>
+${a.name}
+</h2>
+
+
+<div class="tag">
+${a.sport}
+</div>
+
+
+
+<div class="stat-grid">
+
+
+<div class="stat">
+Jump
+<br>
+<b>${a.jump} cm</b>
+</div>
+
+
+
+<div class="stat">
+Running
+<br>
+<b>${a.running}/100</b>
+</div>
+
+
+
+<div class="stat">
+Strength
+<br>
+<b>${a.pushups}/100</b>
+</div>
+
+
+</div>
+
+
+
+
+
+<div class="metric">
+
+Running Form:
+${a.running}/100
+
+
+<div class="bar">
+
+<div class="fill"
+style="width:${a.running}%">
+</div>
+
+</div>
+
+</div>
+
+
+
+
+
+<div class="metric">
+
+High Knees:
+${a.high_knees}/100
+
+
+<div class="bar">
+
+<div class="fill"
+style="width:${a.high_knees}%">
+</div>
+
+</div>
+
+</div>
+
+
+
+
+
+<div class="metric">
+
+Push-ups:
+${a.pushups}/100
+
+
+<div class="bar">
+
+<div class="fill"
+style="width:${a.pushups}%">
+</div>
+
+</div>
+
+</div>
+
+
+
+
+
+<div class="metric">
+
+Plank:
+${a.plank}/100
+
+
+<div class="bar">
+
+<div class="fill"
+style="width:${a.plank}%">
+</div>
+
+</div>
+
+</div>
+
+
+
+
+</div>
+
+
+
+`).join("");
+
+
+
+}
+
+
+
+
+
+document.getElementById("sport").onchange=render;
+
+document.getElementById("sort").onchange=render;
+
+document.getElementById("search").oninput=render;
+
+
+
+loadAthletes();
+
+
+
+</script>
+
+
+</body>
+
+</html>
