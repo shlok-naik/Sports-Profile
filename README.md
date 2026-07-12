@@ -1,5 +1,4 @@
-# CombineAI
-## United Hacks V7
+# CombineAI - United Hacks V7
 
 ## How to Run (Optional Live Demo for Project)
 ### Version
