@@ -78,7 +78,8 @@
   .video-frame img{ width: 100%; height: 100%; object-fit: cover; display:block; }
 
   .hud{ position:absolute; left:0; right:0; display:flex; padding: 12px 16px; pointer-events:none; }
-  .hud-top{ top:0; justify-content: space-between; }
+  .hud-top{ top:0; justify-content: space-between; align-items: center; }
+  
   .hud-chip{
     font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--text);
     background: rgba(11,14,20,0.7); border: 1px solid var(--panel-border);
@@ -91,12 +92,12 @@
   .hud-bottom{
     bottom: 0; background: linear-gradient(180deg, transparent, rgba(11,14,20,0.85) 40%);
     padding-top: 32px; font-size: 14px; color: var(--text);
+    text-align: center; justify-content: center;
   }
   .hud-bottom span{ font-weight: 500; }
   .hud-bottom.warn span{ color: var(--red); }
   .hud-bottom.good span{ color: var(--cyan); }
 
-  /* Form Chat/Fault Log Styles */
   .form-log {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -427,7 +428,6 @@
     if (btnEl) btnEl.classList.add('active');
     clearGauges();
     
-    // Reset fault log on mode changes
     document.getElementById('formLog').innerHTML = '<div style="color: var(--muted); text-align: center; padding: 20px 0;">Log clean. Awaiting activity analysis...</div>';
     lastFeedbackStr = "";
 
@@ -528,7 +528,7 @@
   }
 
   function saveHistory(hist) {
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist)); } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(hist)); } catch (e) { }
   }
 
   function appendSessionRecord(test, entry) {
@@ -545,7 +545,6 @@
     document.getElementById('systemStatus').textContent = "History cleared.";
   }
 
-  // Adjusted sparkline builder to safely scale dynamic metrics like jumps per session rather than assuming global 0-100 base.
   function buildSparkline(history, isJumpEvent = false) {
     const w = 200, h = 56, pad = 6;
     if (!history || history.length === 0) {
@@ -553,7 +552,6 @@
     }
     const n = history.length;
     
-    // Auto-scale peak value bounds dynamically for jumps (cm) or form accuracy (percentage values)
     let maxCeiling = 100;
     if (isJumpEvent) {
       const peakRecordedJump = Math.max(...history.map(e => e.score), 0);
@@ -633,35 +631,41 @@
       const currentScore = data.score ?? 0;
       const unitLabel = repLabels[currentMode] || 'reps';
       
-      // Update our new streamlined minimal single-line counter
       document.getElementById('hudStatsMinimal').textContent = `${currentReps} ${unitLabel} · Score: ${currentScore}`;
 
+      const feedbackText = data.feedback || '';
+      
+      // Separate system/position environment notifications from joint movement form coaching rules
+      const isSystemAlert = /no person|step|frame|calibrat|seconds|remaining|ready|start|system|waiting/i.test(feedbackText);
+      const isFormCoaching = /depth|lockout|stride|form|knee|elbow|straight|bent|low|high|hold/i.test(feedbackText);
+      
       const fbEl = document.getElementById('hudFeedback');
-      fbEl.innerHTML = `<span>${data.feedback || ''}</span>`;
-      
-      const isWarning = /step back|calibrat|no person|make sure|low|shallow|bent/i.test(data.feedback || '');
-      const isGoodForm = /great form|lockout|smooth stride|solid hold/i.test(data.feedback || '');
-      
-      fbEl.classList.toggle('warn', isWarning);
-      fbEl.classList.toggle('good', isGoodForm);
 
-      // Append items to our Chat/Fault logger if form instructions update
-      if (data.feedback && data.feedback !== lastFeedbackStr && (isWarning || isGoodForm)) {
-        lastFeedbackStr = data.feedback;
+      // 1. Process System / Website Interface Alerts at the bottom container of the video stream
+      if (isSystemAlert || feedbackText === "") {
+        fbEl.innerHTML = `<span>${feedbackText}</span>`;
+        // Keep style color coding active strictly for hardware frame setup alerts
+        fbEl.classList.toggle('warn', /no person|step back|make sure/i.test(feedbackText));
+        fbEl.classList.toggle('good', /calibrated|system ready/i.test(feedbackText));
+      }
+
+      // 2. Process Performance Form Biomechanics Coaching tips to the external logs only
+      if (feedbackText && feedbackText !== lastFeedbackStr && isFormCoaching && !isSystemAlert) {
+        lastFeedbackStr = feedbackText;
         const logBox = document.getElementById('formLog');
         
-        // Remove structural placeholder text if it's there
         if(logBox.innerText.includes("Log clean")) { logBox.innerHTML = ''; }
         
         const timestamp = typeof data.time_remaining === 'number' ? data.time_remaining.toFixed(1) + 's' : 'Live';
+        const isGoodForm = /great|lockout|smooth|solid/i.test(feedbackText);
+        
         const logRow = document.createElement('div');
         logRow.className = `log-item ${isGoodForm ? 'good' : ''}`;
         
-        // Output formatted log line with a faux captured tracking index frame
         logRow.innerHTML = `
           <div>
             <span class="log-time">[T-${timestamp}]</span>
-            <span>${data.feedback}</span>
+            <span>${feedbackText}</span>
           </div>
           <span class="log-frame-tag">📸 Frame #${Math.floor(Math.random() * 900) + 100}</span>
         `;
