@@ -81,7 +81,6 @@
     cursor: pointer; text-align: center; transition: border-color .15s, background .15s;
   }
   .drop-zone.dragover { border-color: var(--cyan); background: rgba(63,208,201,0.1); }
-  .drop-zone.processing { cursor: default; }
   .drop-zone-icon { font-size: 26px; color: var(--cyan); }
   .drop-zone-text { font-family: 'Oswald', sans-serif; font-size: 15px; text-transform: uppercase; letter-spacing: 0.5px; }
   .drop-zone-sub { font-size: 12px; color: var(--muted); }
@@ -121,7 +120,6 @@
   }
   .log-item.good { background: rgba(63, 208, 201, 0.08); border-left: 3px solid var(--cyan); }
   .log-time { color: var(--muted); margin-right: 6px; }
-  .log-frame-tag { font-size: 11px; background: var(--bg); border: 1px solid var(--panel-border); padding: 2px 6px; border-radius: 4px; color: var(--amber); }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
   /* Event Grid */
@@ -172,6 +170,7 @@
   button.btn-primary { background: var(--amber); color: #1a1204; transition: background 0.15s ease; }
   button.btn-primary:hover { filter: brightness(1.08); }
   button.btn-primary:disabled { background: var(--panel-border); color: var(--muted); cursor: default; }
+  button.btn-primary.is-stop { background: var(--red); color: #fff; }
   button.btn-secondary { background: transparent; border: 1px solid var(--cyan); color: var(--cyan); }
   button.btn-secondary:hover { background: rgba(63,208,201,0.08); }
   button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
@@ -353,6 +352,10 @@
   // Upload-instead-of-webcam mode
   let sourceMode = "webcam"; // "webcam" | "upload"
   let isUploadProcessing = false;
+  let uploadTimeline = [];
+  let uploadTimelineIdx = 0;
+  let localPreviewUrl = null;
+  let lastKnownSnapshot = null;
 
   // Realtime Timer variables
   let localTimeRemaining = 0;
@@ -405,15 +408,8 @@
   function setStartButtonState(started) {
     isTestRunning = started;
     const startBtn = document.getElementById('startBtn');
-    if (started) {
-      startBtn.textContent = 'Stop';
-      startBtn.style.background = 'var(--red)';
-      startBtn.style.color = '#fff';
-    } else {
-      startBtn.textContent = 'Start';
-      startBtn.style.background = 'var(--amber)';
-      startBtn.style.color = '#1a1204';
-    }
+    startBtn.textContent = started ? 'Stop' : 'Start';
+    startBtn.classList.toggle('is-stop', started);
   }
 
   // --- Smooth 60fps Timer Logic ---
@@ -475,6 +471,7 @@
   }
 
   function setMode(mode, btnEl) {
+    if (isUploadProcessing) return; // Don't let event switches interrupt an in-flight upload
     if(isTestRunning) toggleTest(); // Ensure tests are killed if switching modes mid-flight
 
     currentMode = mode;
@@ -497,6 +494,9 @@
       const replay = document.getElementById('replayVideo');
       replay.classList.add('hidden');
       replay.removeAttribute('src');
+      if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      uploadTimeline = [];
+      uploadTimelineIdx = 0;
       document.getElementById('dropZone').classList.remove('hidden');
       resetDropZone();
     }
@@ -551,9 +551,13 @@
   }
 
   function saveCurrentScore() {
-    fetch('/save_score', { method: 'POST' })
+    fetch('/save_score', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(lastKnownSnapshot || {})
+    })
       .then(res => res.json())
-      .then(data => {
+      .then(() => {
         document.getElementById('systemStatus').textContent = "Score saved to session memory.";
       }).catch(err => console.error("Error saving score:", err));
   }
@@ -588,6 +592,8 @@
   }
 
   function toggleUploadMode() {
+    if (isUploadProcessing) return; // Don't let a mode switch abandon an in-flight upload
+
     const webcamFeed = document.getElementById('webcamFeed');
     const replay = document.getElementById('replayVideo');
     const dropZone = document.getElementById('dropZone');
@@ -603,6 +609,9 @@
 
       replay.classList.add('hidden');
       replay.removeAttribute('src');
+      if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      uploadTimeline = [];
+      uploadTimelineIdx = 0;
 
       resetDropZone();
       dropZone.classList.remove('hidden');
@@ -616,6 +625,9 @@
       dropZone.classList.add('hidden');
       replay.classList.add('hidden');
       replay.removeAttribute('src');
+      if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+      uploadTimeline = [];
+      uploadTimelineIdx = 0;
 
       webcamFeed.classList.remove('hidden');
       webcamFeed.src = "/video_feed?" + Date.now();
@@ -642,10 +654,24 @@
     }
 
     const dropZone = document.getElementById('dropZone');
+    const replay = document.getElementById('replayVideo');
     isUploadProcessing = true;
-    dropZone.classList.add('processing');
-    document.getElementById('dropZoneText').textContent = "Processing video...";
-    document.getElementById('dropZoneSub').textContent = "Analyzing form frame by frame — this can take a moment.";
+    uploadTimeline = [];
+    uploadTimelineIdx = 0;
+
+    // Show the raw clip immediately (rather than a blank drop zone) so
+    // there's always something on screen while the server analyzes it.
+    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
+    localPreviewUrl = URL.createObjectURL(file);
+    replay.src = localPreviewUrl;
+    replay.muted = true;
+    replay.classList.remove('hidden');
+    replay.play().catch(() => {});
+    dropZone.classList.add('hidden');
+
+    document.getElementById('hudTimer').textContent = '…';
+    document.getElementById('hudFeedback').innerHTML = '<span>Analyzing footage frame by frame...</span>';
+    document.getElementById('hudFeedback').className = "hud hud-bottom good";
     document.getElementById('systemStatus').textContent = `Uploading "${file.name}"...`;
 
     const formData = new FormData();
@@ -656,30 +682,64 @@
       .then(res => res.json())
       .then(data => {
         isUploadProcessing = false;
-        dropZone.classList.remove('processing');
 
         if (data.status !== 'processed') {
+          replay.classList.add('hidden');
+          replay.removeAttribute('src');
+          if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+          dropZone.classList.remove('hidden');
           resetDropZone();
           document.getElementById('systemStatus').textContent = data.message || "Could not process video.";
           return;
         }
 
-        dropZone.classList.add('hidden');
-        const replay = document.getElementById('replayVideo');
+        if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+        replay.muted = false;
         replay.src = data.video_url;
         replay.classList.remove('hidden');
         replay.play().catch(() => {});
 
-        processPollData(data);
-        document.getElementById('systemStatus').textContent = "Video processed — replay ready.";
+        uploadTimeline = data.timeline || [];
+        uploadTimelineIdx = 0;
+        if (uploadTimeline.length) {
+          renderTelemetry(uploadTimeline[0]);
+          const tr = uploadTimeline[0].time_remaining;
+          document.getElementById('hudTimer').textContent = typeof tr === 'number' ? tr.toFixed(1) + 's' : '--';
+        }
+
+        document.getElementById('systemStatus').textContent = "Video processed — tracking synced to playback.";
       })
       .catch(err => {
         isUploadProcessing = false;
-        dropZone.classList.remove('processing');
+        replay.classList.add('hidden');
+        replay.removeAttribute('src');
+        if (localPreviewUrl) { URL.revokeObjectURL(localPreviewUrl); localPreviewUrl = null; }
+        dropZone.classList.remove('hidden');
         resetDropZone();
         document.getElementById('systemStatus').textContent = "Upload failed. Try again.";
         console.error('Upload error:', err);
       });
+  }
+
+  // Drives the HUD/gauges/log off the replay's own playback position instead
+  // of a single frozen final snapshot, so reps/score visibly count up as the
+  // annotated video plays back — mirroring how live webcam mode behaves.
+  function renderReplayFrame() {
+    if (!uploadTimeline.length) return;
+    const replay = document.getElementById('replayVideo');
+    const t = replay.currentTime;
+
+    while (uploadTimelineIdx < uploadTimeline.length - 1 && uploadTimeline[uploadTimelineIdx + 1].t <= t) {
+      uploadTimelineIdx++;
+    }
+    while (uploadTimelineIdx > 0 && uploadTimeline[uploadTimelineIdx].t > t) {
+      uploadTimelineIdx--;
+    }
+
+    const entry = uploadTimeline[uploadTimelineIdx];
+    renderTelemetry(entry);
+    document.getElementById('hudTimer').textContent =
+      typeof entry.time_remaining === 'number' ? entry.time_remaining.toFixed(1) + 's' : '--';
   }
 
   function initUploadDropZone() {
@@ -713,10 +773,19 @@
       if (file) handleUploadedFile(file);
       fileInput.value = "";
     });
+
+    document.getElementById('replayVideo').addEventListener('timeupdate', renderReplayFrame);
   }
 
   // --- Real-time Polling ---
   function fetchStats() {
+    // Only poll live webcam telemetry while actually in webcam mode — otherwise
+    // this loop keeps overwriting the HUD with stale live_state data while an
+    // upload is being processed or its replay is playing back.
+    if (sourceMode !== 'webcam') {
+      pollTimeout = setTimeout(fetchStats, 350);
+      return;
+    }
     fetch('/live_stats')
       .then(res => res.json())
       .then(data => processPollData(data))
@@ -726,22 +795,18 @@
       });
   }
 
-  function processPollData(data) {
-    // 1. Critical System Errors (Webcam unplugged or failed)
-    if (data.camera_error) {
-      document.getElementById('hudFeedback').innerHTML = `<span>CRITICAL ERROR: Camera disconnected or blocked. Please refresh the page.</span>`;
-      document.getElementById('hudFeedback').className = "hud hud-bottom warn";
-      if (isTestRunning) toggleTest(); // Trigger Godly Stop
-      return; 
-    }
+  // Shared renderer for both live polling and replay-timeline playback:
+  // HUD counters, feedback banner, form log, gauges and distance/jump meters.
+  function renderTelemetry(data) {
+    lastKnownSnapshot = data;
 
-    // 2. HUD Minimal Stats Update
+    // HUD Minimal Stats Update
     const currentReps = data.reps ?? 0;
     const currentScore = data.score ?? 0;
     const unitLabel = repLabels[currentMode] || 'reps';
     document.getElementById('hudStatsMinimal').textContent = `${currentReps} ${unitLabel} · Score: ${currentScore}`;
 
-    // 3. Central Feedback Overlay Routing
+    // Central Feedback Overlay Routing
     const feedbackText = data.feedback || '';
     const isSystemAlert = /step back|make sure|baseline|flight phase|landing registered|reset and hold|done|waiting|ready/i.test(feedbackText);
     const isFormCoaching = /optimize|maintain|increase|incomplete|engage|eccentric|lumbar|concentric|control|pelvic|isometric|stride|triple-flexion/i.test(feedbackText);
@@ -751,20 +816,20 @@
       fbEl.innerHTML = `<span>${feedbackText}</span>`;
       fbEl.className = "hud hud-bottom warn";
     } else {
-      fbEl.innerHTML = ""; 
+      fbEl.innerHTML = "";
       fbEl.className = "hud hud-bottom";
     }
 
-    // 4. Form Log Scroll Update
+    // Form Log Scroll Update
     if (feedbackText && feedbackText !== lastFeedbackStr && isFormCoaching && !isSystemAlert) {
       lastFeedbackStr = feedbackText;
       const logBox = document.getElementById('formLog');
-      
-      if(logBox.querySelector('.empty-log-state')) { logBox.innerHTML = ''; }
-      
+
+      if (logBox.querySelector('.empty-log-state')) { logBox.innerHTML = ''; }
+
       const timestamp = typeof data.time_remaining === 'number' ? data.time_remaining.toFixed(1) + 's' : 'Live';
       const isNegativeForm = /warning|incomplete|avoid|loss|sagging/i.test(feedbackText);
-      
+
       const logRow = document.createElement('div');
       logRow.className = `log-item ${isNegativeForm ? '' : 'good'}`;
       logRow.innerHTML = `
@@ -772,25 +837,12 @@
           <span class="log-time">[T-${timestamp}]</span>
           <span>${feedbackText}</span>
         </div>
-        <span class="log-frame-tag">📸 Frame #${Math.floor(Math.random() * 900) + 100}</span>
       `;
       logBox.appendChild(logRow);
       logBox.scrollTop = logBox.scrollHeight;
     }
 
-    // 5. Timer Synchronization Check
-    if (typeof data.time_remaining === 'number') {
-      localTimeRemaining = data.time_remaining;
-      lastSyncTime = Date.now();
-      
-      if (isTestRunning && !timerAnimFrame) {
-        timerAnimFrame = requestAnimationFrame(updateLocalTimer);
-      }
-    } else {
-      document.getElementById('hudTimer').textContent = '--';
-    }
-
-    // 6. UI Updates based on event mode
+    // UI Updates based on event mode
     if (data.angles) {
       for (const [key, val] of Object.entries(data.angles)) updateGauge(key, val);
     }
@@ -809,8 +861,32 @@
       document.getElementById('jumpLast').textContent = last.toFixed(0);
       document.getElementById('jumpBarFill').style.width = Math.min(100, (best / 80) * 100) + '%';
     }
+  }
 
-    // 7. Verify Global State matching Backend
+  function processPollData(data) {
+    // Critical System Errors (Webcam unplugged or failed)
+    if (data.camera_error) {
+      document.getElementById('hudFeedback').innerHTML = `<span>CRITICAL ERROR: Camera disconnected or blocked. Please refresh the page.</span>`;
+      document.getElementById('hudFeedback').className = "hud hud-bottom warn";
+      if (isTestRunning) toggleTest(); // Trigger Godly Stop
+      return;
+    }
+
+    renderTelemetry(data);
+
+    // Timer Synchronization Check
+    if (typeof data.time_remaining === 'number') {
+      localTimeRemaining = data.time_remaining;
+      lastSyncTime = Date.now();
+
+      if (isTestRunning && !timerAnimFrame) {
+        timerAnimFrame = requestAnimationFrame(updateLocalTimer);
+      }
+    } else {
+      document.getElementById('hudTimer').textContent = '--';
+    }
+
+    // Verify Global State matching Backend
     if (typeof data.started === 'boolean') {
       const running = data.started && !data.done;
       if (isTestRunning !== running) {

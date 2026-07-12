@@ -751,16 +751,27 @@ def generate_live_stream():
 
 def process_video_file(input_path, output_path, mode):
     """Run an uploaded video through the given test end-to-end: writes an
-    annotated (skeleton-overlaid) copy to output_path and updates live_state
-    with the final score/feedback via the exact same scoring path used by
-    the live webcam, so results are consistent between the two.
+    annotated (skeleton-overlaid) copy to output_path and returns the final
+    score/feedback plus a per-frame timeline so the frontend can sync the
+    rep counter and gauges to video playback instead of showing a single
+    frozen final number.
+
+    This runs against its own isolated FitnessTest instance rather than the
+    shared `live_state`, so processing an upload never races with (or gets
+    overwritten by) live webcam telemetry.
 
     Test duration cutoffs are measured against the video's own timestamps
     (frame_index / fps) rather than wall-clock time, since processing runs
-    faster or slower than real playback depending on the machine.
+    faster or slower than real playback depending on the machine. Skeleton
+    drawing continues for every frame with a detected pose, even after the
+    timed portion of the test ends, so the replay doesn't go blank partway
+    through.
     """
-    live_state.set_test(mode)
-    live_state.start_test()
+    factory = TEST_REGISTRY.get(mode)
+    if factory is None:
+        raise ValueError(f"Unknown mode '{mode}'")
+    test = factory()
+    test.start()
 
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
     cap = cv2.VideoCapture(input_path)
@@ -772,7 +783,12 @@ def process_video_file(input_path, output_path, mode):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
+    if not writer.isOpened():
+        cap.release()
+        pose.close()
+        raise ValueError("Could not create annotated output video (codec unavailable)")
 
+    timeline = []
     frame_index = 0
     try:
         while cap.isOpened():
@@ -780,29 +796,29 @@ def process_video_file(input_path, output_path, mode):
             if not ret:
                 break
 
+            video_time = frame_index / fps
+            if getattr(test, "start_time", None) is not None:
+                test.start_time = time.time() - video_time
+
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = pose.process(rgb_frame)
 
-            with live_state._lock:
-                test = live_state.active_test
-                # Anchor the test's internal clock to this frame's position in the
-                # video, not to wall-clock time, so timed tests (10s/15s/30s) score
-                # against video content rather than however fast this loop runs.
-                if test is not None and getattr(test, "start_time", None) is not None:
-                    test.start_time = time.time() - (frame_index / fps)
+            if results.pose_landmarks:
+                test.process_frame(results.pose_landmarks.landmark, frame.shape)
+                mp_drawing.draw_landmarks(
+                    frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
+                    landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style(),
+                )
 
-                if results.pose_landmarks and test and not test.is_done:
-                    score, feedback = test.process_frame(results.pose_landmarks.landmark, frame.shape)
-
-                    live_state.current_score = score
-                    live_state.current_feedback = feedback
-                    live_state.current_extra = test.snapshot_extra()
-                    live_state.is_done = test.is_done
-
-                    mp_drawing.draw_landmarks(
-                        frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS,
-                        landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style(),
-                    )
+            timeline.append({
+                "t": round(video_time, 2),
+                "test": mode,
+                "score": test.quality_score,
+                "feedback": test.feedback,
+                "done": test.is_done,
+                "started": True,
+                **test.snapshot_extra(),
+            })
 
             writer.write(frame)
             frame_index += 1
@@ -811,7 +827,13 @@ def process_video_file(input_path, output_path, mode):
         writer.release()
         pose.close()
 
-    with live_state._lock:
-        live_state.is_done = True
-        if live_state.active_test:
-            live_state.active_test.is_done = True
+    test.is_done = True
+    final = {
+        "test": mode,
+        "score": test.quality_score,
+        "feedback": test.feedback,
+        "done": True,
+        "started": True,
+        **test.snapshot_extra(),
+    }
+    return {"final": final, "timeline": timeline}

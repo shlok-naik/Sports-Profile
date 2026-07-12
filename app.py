@@ -83,9 +83,11 @@ def restart_test():
 @app.route('/upload_video', methods=['POST'])
 def upload_video():
     """Processes an uploaded video file end-to-end (instead of the live webcam)
-    and returns the final score plus a URL to the annotated replay."""
+    and returns the final score, a URL to the annotated replay, and a
+    per-frame timeline the frontend uses to sync the rep counter to
+    playback instead of showing one frozen final number."""
     file = request.files.get('video')
-    mode = request.form.get('mode', live_state.test_name)
+    mode = request.form.get('mode', 'high_knees')
 
     if not file or file.filename == '':
         return jsonify({"status": "error", "message": "No video file provided"}), 400
@@ -102,16 +104,19 @@ def upload_video():
     output_path = os.path.join(UPLOAD_DIR, output_filename)
 
     try:
-        process_video_file(upload_path, output_path, mode)
+        result = process_video_file(upload_path, output_path, mode)
     except Exception as e:
         return jsonify({"status": "error", "message": f"Could not process video: {e}"}), 500
     finally:
         if os.path.exists(upload_path):
             os.remove(upload_path)
 
-    snap = live_state.snapshot()
-    snap["video_url"] = f"/static/uploads/{output_filename}"
-    return jsonify({"status": "processed", **snap})
+    return jsonify({
+        "status": "processed",
+        "video_url": f"/static/uploads/{output_filename}",
+        "timeline": result["timeline"],
+        **result["final"],
+    })
 
 
 @app.route('/live_stats')
@@ -126,8 +131,12 @@ def live_stats():
 
 @app.route('/save_score', methods=['POST'])
 def save_score():
-    """Commits the current session's score to the local user_stats dictionary."""
-    snap = live_state.snapshot()
+    """Commits the current session's score to the local user_stats dictionary.
+    Accepts an optional JSON snapshot (used after an uploaded-video result,
+    which lives client-side rather than in `live_state`); falls back to the
+    live webcam telemetry when no snapshot is provided."""
+    posted = request.json or {}
+    snap = posted if posted.get("test") else live_state.snapshot()
     test = snap.get("test")
 
     if test == "jump":
@@ -202,4 +211,6 @@ if __name__ == '__main__':
     print(f"\n🚀 Combine AI Dashboard is live! Open your browser and go to:")
     print(f"👉 http://{HOST}:{PORT}\n")
 
-    app.run(host=HOST, port=PORT, debug=False)
+    # threaded=True so a slow, blocking /upload_video request can't stall the
+    # live MJPEG stream or the /live_stats poll for other concurrent requests.
+    app.run(host=HOST, port=PORT, debug=False, threaded=True)
