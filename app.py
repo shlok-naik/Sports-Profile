@@ -6,7 +6,10 @@ import time
 import uuid
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
-from detector import generate_live_stream, live_state, TEST_REGISTRY, process_video_file
+from detector import (
+    generate_live_stream, live_state, TEST_REGISTRY, process_video_file,
+    get_required_duration, get_video_duration_seconds,
+)
 
 app = Flask(__name__)
 
@@ -99,6 +102,24 @@ def upload_video():
     uid = uuid.uuid4().hex
     upload_path = os.path.join(UPLOAD_DIR, f"{uid}_{secure_filename(file.filename)}")
     file.save(upload_path)
+
+    # Reject clips that are too short for the selected test before running
+    # them through the (expensive) pose-tracking pipeline. If the duration
+    # can't be determined (unusual codec/container), skip the check and let
+    # process_video_file surface any real problem instead.
+    required_duration = get_required_duration(mode)
+    if required_duration:
+        video_duration = get_video_duration_seconds(upload_path)
+        if video_duration is not None and video_duration < required_duration:
+            os.remove(upload_path)
+            return jsonify({
+                "status": "error",
+                "message": (
+                    f"This clip is too short for the {mode.replace('_', ' ')} test — "
+                    f"it needs to be at least {required_duration:.0f}s long, but this "
+                    f"video is only {video_duration:.1f}s."
+                ),
+            }), 400
 
     output_filename = f"annotated_{uid}.mp4"
     output_path = os.path.join(UPLOAD_DIR, output_filename)

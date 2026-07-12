@@ -629,6 +629,29 @@ TEST_REGISTRY = {
 }
 
 
+def get_required_duration(mode):
+    """Returns the fixed test duration (seconds) for timed tests, or None
+    for untimed tests (e.g. push-ups) that have no minimum clip length."""
+    factory = TEST_REGISTRY.get(mode)
+    if factory is None:
+        return None
+    return getattr(factory(), "duration", None)
+
+
+def get_video_duration_seconds(path):
+    """Returns a video file's duration in seconds, or None if it can't be determined."""
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        cap.release()
+        return None
+    fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
+    cap.release()
+    if fps <= 0 or frame_count <= 0:
+        return None
+    return frame_count / fps
+
+
 # --- LIVE STATE MANAGER ---
 class LiveState:
     def __init__(self):

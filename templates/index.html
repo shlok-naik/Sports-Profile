@@ -374,6 +374,13 @@
     running_spot: "steps", jump: "jumps", high_knees: "reps", pushup: "reps", plank: "checks",
   };
 
+  // Minimum clip length required for each timed test (seconds); untimed
+  // tests (push-ups) are omitted and skip the length check. Mirrors the
+  // durations in detector.py's TEST_REGISTRY.
+  const testDurations = {
+    running_spot: 10, jump: 15, high_knees: 10, plank: 30,
+  };
+
   // --- UI Builders ---
   function buildGauge(key) {
     const wrap = document.createElement('div');
@@ -646,7 +653,25 @@
     }
   }
 
-  function handleUploadedFile(file) {
+  // Reads a video file's duration client-side (via a hidden probe element)
+  // so a too-short clip can be rejected before it's even uploaded. Resolves
+  // null (rather than hanging) if metadata never loads within 4s, so an
+  // unreadable probe never blocks a real upload — the backend re-checks
+  // duration authoritatively anyway.
+  function getVideoDurationFromUrl(url) {
+    return new Promise((resolve) => {
+      const probe = document.createElement('video');
+      probe.preload = 'metadata';
+      let settled = false;
+      const finish = (val) => { if (!settled) { settled = true; resolve(val); } };
+      probe.onloadedmetadata = () => finish(isFinite(probe.duration) ? probe.duration : null);
+      probe.onerror = () => finish(null);
+      probe.src = url;
+      setTimeout(() => finish(null), 4000);
+    });
+  }
+
+  async function handleUploadedFile(file) {
     if (isUploadProcessing) return;
     if (!file.type.startsWith('video/')) {
       document.getElementById('systemStatus').textContent = "Please choose a video file.";
@@ -655,6 +680,19 @@
 
     const dropZone = document.getElementById('dropZone');
     const replay = document.getElementById('replayVideo');
+
+    const objectUrl = URL.createObjectURL(file);
+    const requiredDuration = testDurations[currentMode];
+    if (requiredDuration) {
+      const duration = await getVideoDurationFromUrl(objectUrl);
+      if (duration !== null && duration < requiredDuration) {
+        URL.revokeObjectURL(objectUrl);
+        document.getElementById('systemStatus').textContent =
+          `This clip is too short for ${currentMode.replace('_', ' ')} — needs at least ${requiredDuration}s, this video is ${duration.toFixed(1)}s.`;
+        return;
+      }
+    }
+
     isUploadProcessing = true;
     uploadTimeline = [];
     uploadTimelineIdx = 0;
@@ -662,7 +700,7 @@
     // Show the raw clip immediately (rather than a blank drop zone) so
     // there's always something on screen while the server analyzes it.
     if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
-    localPreviewUrl = URL.createObjectURL(file);
+    localPreviewUrl = objectUrl;
     replay.src = localPreviewUrl;
     replay.muted = true;
     replay.classList.remove('hidden');
