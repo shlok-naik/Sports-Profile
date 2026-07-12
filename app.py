@@ -121,17 +121,19 @@ def upload_video():
                 ),
             }), 400
 
-    output_filename = f"annotated_{uid}.mp4"
-    output_path = os.path.join(UPLOAD_DIR, output_filename)
+    # No extension here — process_video_file picks whichever codec actually
+    # works on this machine and appends the matching extension itself.
+    output_base_path = os.path.join(UPLOAD_DIR, f"annotated_{uid}")
 
     try:
-        result = process_video_file(upload_path, output_path, mode)
+        result = process_video_file(upload_path, output_base_path, mode)
     except Exception as e:
         return jsonify({"status": "error", "message": f"Could not process video: {e}"}), 500
     finally:
         if os.path.exists(upload_path):
             os.remove(upload_path)
 
+    output_filename = os.path.basename(result["output_path"])
     return jsonify({
         "status": "processed",
         "video_url": f"/static/uploads/{output_filename}",

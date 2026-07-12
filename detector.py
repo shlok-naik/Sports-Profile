@@ -772,10 +772,38 @@ def generate_live_stream():
         live_state.is_streaming = False
 
 
-def process_video_file(input_path, output_path, mode):
+# Codecs to try, in order of preference, when writing the annotated replay.
+# avc1 (H.264) gives the best browser compatibility and smallest files, but
+# pip-installed opencv-python does not bundle the OpenH264 encoder (it's
+# separately licensed by Cisco), so it commonly fails to open at all. VP8/
+# webm is royalty-free, reliably bundled with OpenCV's FFmpeg build, and
+# plays natively in <video> tags, so it's a solid fallback. mp4v is a last
+# resort that's always available but may not play in-browser.
+_CODEC_CANDIDATES = [
+    ("avc1", ".mp4"),
+    ("VP80", ".webm"),
+    ("mp4v", ".mp4"),
+]
+
+
+def _open_video_writer(output_base_path, fps, width, height):
+    """Tries each codec in _CODEC_CANDIDATES and returns (writer, output_path)
+    for the first one that actually opens. Raises ValueError if none do."""
+    for fourcc_str, ext in _CODEC_CANDIDATES:
+        path = output_base_path + ext
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*fourcc_str), fps, (width, height))
+        if writer.isOpened():
+            return writer, path
+        writer.release()
+    raise ValueError("No supported video codec is available on this machine")
+
+
+def process_video_file(input_path, output_base_path, mode):
     """Run an uploaded video through the given test end-to-end: writes an
-    annotated (skeleton-overlaid) copy to output_path and returns the final
-    score/feedback plus a per-frame timeline so the frontend can sync the
+    annotated (skeleton-overlaid) copy alongside output_base_path (picking
+    whichever codec/extension actually works on this machine — see
+    _open_video_writer) and returns the final score/feedback, the path
+    actually written, and a per-frame timeline so the frontend can sync the
     rep counter and gauges to video playback instead of showing a single
     frozen final number.
 
@@ -805,11 +833,12 @@ def process_video_file(input_path, output_path, mode):
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'avc1'), fps, (width, height))
-    if not writer.isOpened():
+    try:
+        writer, output_path = _open_video_writer(output_base_path, fps, width, height)
+    except ValueError:
         cap.release()
         pose.close()
-        raise ValueError("Could not create annotated output video (codec unavailable)")
+        raise
 
     timeline = []
     frame_index = 0
@@ -859,4 +888,4 @@ def process_video_file(input_path, output_path, mode):
         "started": True,
         **test.snapshot_extra(),
     }
-    return {"final": final, "timeline": timeline}
+    return {"final": final, "timeline": timeline, "output_path": output_path}
