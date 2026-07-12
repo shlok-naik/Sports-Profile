@@ -1,6 +1,9 @@
 # CombineAI - United Hacks V7
 
 ## How to Run (Optional Live Demo for Project)
+### Info
+The Scout Dashboard will not work with this Live Demo method as the database is done locally however the rest of the features will work
+
 ### Version
 To run this app, you must use python versions 3.9-3.12 (3.9.13 is the one that works most reliably for us).
 
