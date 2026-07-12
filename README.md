@@ -3,7 +3,7 @@
 ## How to Run (Optional Live Demo for Project)
 To run this app, you must use python versions 3.9-3.12 (3.9.13 is the one that works most reliably for us).
 
-After installing this, you can create a venv to store the requirements (recommended) or do it on your global python save.
+After installing this, you can create a venv to store the requirements `python -3.9 -m venv venv` (recommended) or do it on your global python save.
 
 You must run `pip install -r requirements.txt` to install required modules.
 
