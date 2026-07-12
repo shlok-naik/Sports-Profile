@@ -712,12 +712,7 @@ live_state = LiveState()
 
 
 def _draw_hud(frame, score, feedback, warn):
-    color = (70, 200, 255) if not warn else (60, 90, 255)  # BGR: amber-ish vs red-ish
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (frame.shape[1], 90), (10, 10, 12), -1)
-    frame[:] = cv2.addWeighted(overlay, 0.65, frame, 0.35, 0)
-    cv2.putText(frame, f"SCORE: {score}", (14, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-    cv2.putText(frame, feedback[:60], (14, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    pass
 
 
 def generate_live_stream():
@@ -754,8 +749,7 @@ def generate_live_stream():
                     landmark_drawing_spec=mp_drawing_styles.get_default_pose_landmarks_style(),
                 )
             elif not results.pose_landmarks:
-                with live_state._lock:
-                    live_state.current_feedback = "No person detected — step into frame"
+               pass
 
             with live_state._lock:
                 disp_score = live_state.current_score

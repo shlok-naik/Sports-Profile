@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Combine AI — Scouting Report</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght=500;600;700&family=Inter:wght=400;500;600&family=JetBrains+Mono:wght=500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg: #0b0e14;
@@ -82,8 +82,8 @@
   
   .hud-chip{
     font-family:'JetBrains Mono', monospace; font-size: 13px; color: var(--text);
-    background: rgba(11,14,20,0.7); border: 1px solid var(--panel-border);
-    padding: 6px 12px; border-radius: 999px; backdrop-filter: blur(4px);
+    background: #0b0e14; border: 1px solid var(--panel-border);
+    padding: 6px 12px; border-radius: 999px;
   }
   .hud-stats-minimal {
     font-weight: 500;
@@ -93,6 +93,7 @@
     bottom: 0; background: linear-gradient(180deg, transparent, rgba(11,14,20,0.85) 40%);
     padding-top: 32px; font-size: 14px; color: var(--text);
     text-align: center; justify-content: center;
+    min-height: 48px;
   }
   .hud-bottom span{ font-weight: 500; }
   .hud-bottom.warn span{ color: var(--red); }
@@ -267,7 +268,7 @@
             <div class="hud-chip" id="hudTimer">--</div>
             <div class="hud-chip hud-stats-minimal" id="hudStatsMinimal">0 reps · Score: 0</div>
           </div>
-          <div class="hud hud-bottom" id="hudFeedback"><span>Press Start when you're ready</span></div>
+          <div class="hud hud-bottom" id="hudFeedback"></div>
         </div>
 
         <div style="margin-top: 16px;">
@@ -635,21 +636,19 @@
 
       const feedbackText = data.feedback || '';
       
-      // Separate system/position environment notifications from joint movement form coaching rules
       const isSystemAlert = /no person|step|frame|calibrat|seconds|remaining|ready|start|system|waiting/i.test(feedbackText);
       const isFormCoaching = /depth|lockout|stride|form|knee|elbow|straight|bent|low|high|hold/i.test(feedbackText);
       
       const fbEl = document.getElementById('hudFeedback');
 
-      // 1. Process System / Website Interface Alerts at the bottom container of the video stream
       if (isSystemAlert || feedbackText === "") {
+        fbEl.innerHTML = ""; 
+        fbEl.className = "hud hud-bottom";
+      } else if (isFormCoaching) {
         fbEl.innerHTML = `<span>${feedbackText}</span>`;
-        // Keep style color coding active strictly for hardware frame setup alerts
-        fbEl.classList.toggle('warn', /no person|step back|make sure/i.test(feedbackText));
-        fbEl.classList.toggle('good', /calibrated|system ready/i.test(feedbackText));
+        fbEl.className = "hud hud-bottom warn";
       }
 
-      // 2. Process Performance Form Biomechanics Coaching tips to the external logs only
       if (feedbackText && feedbackText !== lastFeedbackStr && isFormCoaching && !isSystemAlert) {
         lastFeedbackStr = feedbackText;
         const logBox = document.getElementById('formLog');

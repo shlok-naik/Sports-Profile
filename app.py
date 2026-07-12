@@ -120,6 +120,6 @@ if __name__ == '__main__':
     live_state.set_test("running_spot")
 
     print("\n🚀 Combine AI Dashboard is live! Open your browser and go to:")
-    print("👉 http://127.0.0.1:5000\n")
+    print("👉 http://127.0.0.1:5001\n")
 
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    app.run(host='127.0.0.1', port=5001, debug=False)
